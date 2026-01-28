@@ -6,7 +6,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=== Instalador Opa Suite Dashboard (Full Stack) ===${NC}"
+echo -e "${GREEN}=== Instalador/Atualizador Opa Suite Dashboard ===${NC}"
 
 # Verificar se está rodando como root
 if [ "$EUID" -ne 0 ]; then 
@@ -15,94 +15,119 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # ==========================================
-# 1. Coleta de Dados
+# 1. Coleta de Dados Básicos
 # ==========================================
 echo -e "${YELLOW}Digite o domínio ou subdomínio (ex: dash.meudominio.com):${NC}"
 read DOMAIN
 
-echo -e "${YELLOW}Digite a URL do repositório GitHub (ex: https://github.com/seu-usuario/seu-repo.git):${NC}"
-read REPO_URL
-
-echo -e "${YELLOW}Configuração do Banco de Dados MySQL:${NC}"
-echo -e "Nome do Banco de Dados [opadashboard]:"
-read DB_NAME
-DB_NAME=${DB_NAME:-opadashboard}
-
-echo -e "Usuário do Banco [opadash]:"
-read DB_USER
-DB_USER=${DB_USER:-opadash}
-
-echo -e "Senha do Banco:"
-read -s DB_PASSWORD
-echo
-
-if [ -z "$DOMAIN" ] || [ -z "$REPO_URL" ] || [ -z "$DB_PASSWORD" ]; then
-  echo -e "${RED}Domínio, Repositório e Senha do Banco são obrigatórios.${NC}"
+if [ -z "$DOMAIN" ]; then
+  echo -e "${RED}Domínio é obrigatório.${NC}"
   exit 1
 fi
 
+APP_DIR="/var/www/$DOMAIN"
+IS_UPDATE=0
+
+# Verifica se é uma atualização ou instalação nova
+if [ -d "$APP_DIR/.git" ]; then
+    echo -e "${GREEN}Instalação existente detectada em $APP_DIR.${NC}"
+    echo -e "${GREEN}Modo de ATUALIZAÇÃO ativado.${NC}"
+    IS_UPDATE=1
+else
+    echo -e "${GREEN}Nenhuma instalação encontrada em $APP_DIR.${NC}"
+    echo -e "${GREEN}Modo de NOVA INSTALAÇÃO ativado.${NC}"
+fi
+
 # ==========================================
-# 2. Atualização e Instalação de Pacotes
+# 2. Dados de Conexão (Só pede se for instalação nova ou se .env não existir)
 # ==========================================
-echo -e "${GREEN}Atualizando sistema e instalando dependências...${NC}"
-apt update && apt upgrade -y
+
+if [ $IS_UPDATE -eq 0 ] || [ ! -f "$APP_DIR/.env" ]; then
+    echo -e "${YELLOW}Digite a URL do repositório GitHub:${NC}"
+    read REPO_URL
+
+    echo -e "${YELLOW}Configuração do Banco de Dados MySQL:${NC}"
+    echo -e "Nome do Banco de Dados [opadashboard]:"
+    read DB_NAME
+    DB_NAME=${DB_NAME:-opadashboard}
+
+    echo -e "Usuário do Banco [opadash]:"
+    read DB_USER
+    DB_USER=${DB_USER:-opadash}
+
+    echo -e "Senha do Banco:"
+    read -s DB_PASSWORD
+    echo
+fi
+
+# ==========================================
+# 3. Pacotes do Sistema
+# ==========================================
+echo -e "${GREEN}Verificando pacotes do sistema...${NC}"
+apt update
 apt install -y nginx certbot python3-certbot-nginx curl git mysql-server build-essential
 
-# Instalar Node.js 20
-echo -e "${GREEN}Instalando Node.js 20...${NC}"
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt install -y nodejs
+# Node.js check
+if ! command -v node &> /dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt install -y nodejs
+fi
 
-# Instalar PM2 globalmente
-npm install -g pm2
-
-# ==========================================
-# 3. Configuração do MySQL
-# ==========================================
-echo -e "${GREEN}Configurando MySQL...${NC}"
-
-# Criação do Banco e Usuário
-mysql -u root -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME};"
-mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
-mysql -u root -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
-mysql -u root -e "FLUSH PRIVILEGES;"
-
-echo -e "${GREEN}Banco de dados configurado.${NC}"
+# PM2 check
+if ! command -v pm2 &> /dev/null; then
+    npm install -g pm2
+fi
 
 # ==========================================
-# 4. Clonagem e Configuração do Projeto
+# 4. Configuração do MySQL (Apenas garante existência)
 # ==========================================
-APP_DIR="/var/www/$DOMAIN"
+if [ $IS_UPDATE -eq 0 ]; then
+    echo -e "${GREEN}Configurando MySQL...${NC}"
+    mysql -u root -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME};"
+    mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
+    mysql -u root -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
+    mysql -u root -e "FLUSH PRIVILEGES;"
+fi
 
-echo -e "${GREEN}Preparando diretório $APP_DIR...${NC}"
+# ==========================================
+# 5. Gerenciamento do Código Fonte
+# ==========================================
 mkdir -p $APP_DIR
-rm -rf $APP_DIR/* # Limpa instalação anterior se existir
 
-# Clonar Repositório
-echo -e "${YELLOW}Clonando repositório...${NC}"
-git clone $REPO_URL $APP_DIR
-
-cd $APP_DIR
-
-# Criar arquivo .env
-echo -e "${YELLOW}Criando arquivo de configuração (.env)...${NC}"
-cat > .env <<EOL
+if [ $IS_UPDATE -eq 1 ]; then
+    # ATUALIZAÇÃO
+    echo -e "${YELLOW}Atualizando código fonte (git pull)...${NC}"
+    cd $APP_DIR
+    git reset --hard
+    git pull
+else
+    # INSTALAÇÃO NOVA
+    if [ "$(ls -A $APP_DIR)" ]; then
+       echo -e "${RED}O diretório $APP_DIR não está vazio e não é um repositório git. Limpando...${NC}"
+       rm -rf $APP_DIR/*
+       rm -rf $APP_DIR/.* 2>/dev/null
+    fi
+    
+    echo -e "${YELLOW}Clonando repositório...${NC}"
+    git clone $REPO_URL $APP_DIR
+    cd $APP_DIR
+    
+    # Criar .env apenas na instalação nova
+    echo -e "${YELLOW}Criando arquivo .env...${NC}"
+    cat > .env <<EOL
 PORT=3000
 DB_HOST=localhost
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=${DB_NAME}
 EOL
+fi
 
 # ==========================================
-# 5. Build e Instalação
+# 6. Build
 # ==========================================
 echo -e "${GREEN}Instalando dependências e compilando...${NC}"
-
-# Instalar dependências (Backend + Frontend)
 npm install
-
-# Build do Frontend (Vite)
 npm run build
 
 if [ ! -d "dist" ]; then
@@ -111,31 +136,29 @@ if [ ! -d "dist" ]; then
 fi
 
 # ==========================================
-# 6. Inicialização do Backend (PM2)
+# 7. Gerenciamento de Processos (PM2)
 # ==========================================
-echo -e "${GREEN}Iniciando Backend com PM2...${NC}"
+echo -e "${GREEN}Atualizando processo PM2...${NC}"
 pm2 stop opa-dash-api 2>/dev/null
 pm2 delete opa-dash-api 2>/dev/null
 pm2 start server.cjs --name "opa-dash-api"
 pm2 save
-pm2 startup | tail -n 1 | bash # Configura startup automático
 
 # ==========================================
-# 7. Configuração do Nginx (Reverse Proxy)
+# 8. Nginx e SSL (Só configura se não existir)
 # ==========================================
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
-echo -e "${GREEN}Configurando Nginx...${NC}"
 
-cat > $NGINX_CONF <<EOL
+if [ ! -f "$NGINX_CONF" ]; then
+    echo -e "${GREEN}Configurando Nginx...${NC}"
+    cat > $NGINX_CONF <<EOL
 server {
     listen 80;
     server_name $DOMAIN;
 
-    # Frontend estático (React Build)
     root $APP_DIR/dist;
     index index.html;
 
-    # Rota para API (Proxy para Node.js)
     location /api/ {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
@@ -145,46 +168,30 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 
-    # Rota padrão (SPA - Redireciona tudo para index.html exceto API)
     location / {
         try_files \$uri \$uri/ /index.html;
     }
 
-    # Cache estático para assets
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, no-transform";
     }
-
-    error_log /var/log/nginx/${DOMAIN}_error.log;
-    access_log /var/log/nginx/${DOMAIN}_access.log;
 }
 EOL
 
-# Ativar site
-ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-
-# Testar e reiniciar Nginx
-nginx -t
-if [ $? -eq 0 ]; then
+    ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
     systemctl restart nginx
+
+    echo -e "${YELLOW}Configurando SSL...${NC}"
+    certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN --redirect
 else
-    echo -e "${RED}Erro na configuração do Nginx.${NC}"
-    exit 1
+    echo -e "${GREEN}Configuração Nginx já existente. Reiniciando serviço...${NC}"
+    systemctl restart nginx
 fi
 
-# ==========================================
-# 8. SSL (Certbot)
-# ==========================================
-echo -e "${YELLOW}Solicitando certificado SSL (Let's Encrypt)...${NC}"
-certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN --redirect
-
-# ==========================================
-# 9. Finalização
-# ==========================================
-echo -e "${GREEN}=== Instalação Concluída com Sucesso! ===${NC}"
-echo -e "Acesse seu dashboard em: https://$DOMAIN"
-echo -e "Usuário Padrão (Suporte): suporte"
-echo -e "Senha Padrão: 200616"
-echo -e "Banco de dados: $DB_NAME configurado."
+echo -e "${GREEN}=== Processo Concluído! ===${NC}"
+echo -e "Acesse: https://$DOMAIN"
+if [ $IS_UPDATE -eq 0 ]; then
+    echo -e "Credenciais Padrão -> Usuário: suporte | Senha: 200616"
+fi
