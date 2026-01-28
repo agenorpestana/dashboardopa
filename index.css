@@ -1,0 +1,25 @@
+/* @tailwind base; - Handled by CDN */
+/* @tailwind components; - Handled by CDN */
+/* @tailwind utilities; - Handled by CDN */
+
+body {
+  background-color: #0f172a; /* slate-950 fallback */
+  color: #e2e8f0;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1e293b; 
+}
+::-webkit-scrollbar-thumb {
+  background: #475569; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b; 
+}
