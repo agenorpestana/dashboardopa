@@ -143,7 +143,8 @@ fi
 echo -e "${GREEN}Reiniciando Backend...${NC}"
 # Para e remove processo antigo para garantir atualização das variáveis e código
 pm2 delete opa-dash-api 2>/dev/null
-pm2 start server.cjs --name "opa-dash-api"
+# Agora inicia o server.js
+pm2 start server.js --name "opa-dash-api"
 pm2 save
 
 # ==========================================
