@@ -6,7 +6,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=== Instalador/Atualizador Opa Suite Dashboard ===${NC}"
+echo -e "${GREEN}=== Instalador/Atualizador Opa Suite Dashboard v2 ===${NC}"
 
 # Verificar se está rodando como root
 if [ "$EUID" -ne 0 ]; then 
@@ -39,9 +39,10 @@ else
 fi
 
 # ==========================================
-# 2. Dados de Conexão (Só pede se for instalação nova ou se .env não existir)
+# 2. Dados de Conexão (Só pede se necessário)
 # ==========================================
 
+# Se for nova instalação OU se o arquivo .env não existir
 if [ $IS_UPDATE -eq 0 ] || [ ! -f "$APP_DIR/.env" ]; then
     echo -e "${YELLOW}Digite a URL do repositório GitHub:${NC}"
     read REPO_URL
@@ -67,7 +68,7 @@ echo -e "${GREEN}Verificando pacotes do sistema...${NC}"
 apt update
 apt install -y nginx certbot python3-certbot-nginx curl git mysql-server build-essential
 
-# Node.js check
+# Node.js check (Versão 20 LTS)
 if ! command -v node &> /dev/null; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     apt install -y nodejs
@@ -79,9 +80,10 @@ if ! command -v pm2 &> /dev/null; then
 fi
 
 # ==========================================
-# 4. Configuração do MySQL (Apenas garante existência)
+# 4. Configuração do MySQL (Garante usuário/banco)
 # ==========================================
-if [ $IS_UPDATE -eq 0 ]; then
+# Só executa setup de banco se tivermos a senha disponível (Nova instalação ou inserida manualmente)
+if [ ! -z "$DB_PASSWORD" ]; then
     echo -e "${GREEN}Configurando MySQL...${NC}"
     mysql -u root -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME};"
     mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
@@ -103,7 +105,7 @@ if [ $IS_UPDATE -eq 1 ]; then
 else
     # INSTALAÇÃO NOVA
     if [ "$(ls -A $APP_DIR)" ]; then
-       echo -e "${RED}O diretório $APP_DIR não está vazio e não é um repositório git. Limpando...${NC}"
+       echo -e "${RED}O diretório $APP_DIR não está vazio. Limpando...${NC}"
        rm -rf $APP_DIR/*
        rm -rf $APP_DIR/.* 2>/dev/null
     fi
@@ -138,14 +140,14 @@ fi
 # ==========================================
 # 7. Gerenciamento de Processos (PM2)
 # ==========================================
-echo -e "${GREEN}Atualizando processo PM2...${NC}"
-pm2 stop opa-dash-api 2>/dev/null
+echo -e "${GREEN}Reiniciando Backend...${NC}"
+# Para e remove processo antigo para garantir atualização das variáveis e código
 pm2 delete opa-dash-api 2>/dev/null
 pm2 start server.cjs --name "opa-dash-api"
 pm2 save
 
 # ==========================================
-# 8. Nginx e SSL (Só configura se não existir)
+# 8. Nginx e SSL
 # ==========================================
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 
@@ -159,6 +161,7 @@ server {
     root $APP_DIR/dist;
     index index.html;
 
+    # Proxy para API
     location /api/ {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
@@ -168,6 +171,7 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 
+    # SPA Frontend
     location / {
         try_files \$uri \$uri/ /index.html;
     }
@@ -181,9 +185,12 @@ EOL
 
     ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
     rm -f /etc/nginx/sites-enabled/default
+    
+    # Testa configuração
+    nginx -t
     systemctl restart nginx
 
-    echo -e "${YELLOW}Configurando SSL...${NC}"
+    echo -e "${YELLOW}Configurando SSL (Let's Encrypt)...${NC}"
     certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN --redirect
 else
     echo -e "${GREEN}Configuração Nginx já existente. Reiniciando serviço...${NC}"
@@ -191,7 +198,8 @@ else
 fi
 
 echo -e "${GREEN}=== Processo Concluído! ===${NC}"
-echo -e "Acesse: https://$DOMAIN"
+echo -e "1. Acesse: https://$DOMAIN"
 if [ $IS_UPDATE -eq 0 ]; then
-    echo -e "Credenciais Padrão -> Usuário: suporte | Senha: 200616"
+    echo -e "2. Vá em Configurações > Login"
+    echo -e "3. Usuário: suporte | Senha: 200616"
 fi
