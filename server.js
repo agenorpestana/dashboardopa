@@ -12,6 +12,10 @@ const __dirname = dirname(__filename);
 
 dotenv.config();
 
+// IMPORTANTE: Ignora erros de certificado SSL auto-assinados ou inválidos na API de destino
+// Isso resolve a maioria dos erros "fetch failed" em ambientes corporativos
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -73,7 +77,8 @@ async function initDB() {
 
     connection.release();
   } catch (error) {
-    console.error('Erro ao inicializar banco de dados:', error);
+    console.error('Erro fatal ao conectar no banco de dados. Verifique as credenciais no .env');
+    console.error(error);
   }
 }
 
@@ -103,7 +108,7 @@ app.post('/api/login', async (req, res) => {
     res.json({ success: true, username: user.username });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, error: 'Erro interno' });
+    res.status(500).json({ success: false, error: 'Erro interno no login' });
   }
 });
 
@@ -146,12 +151,11 @@ app.post('/api/settings', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, error: 'Erro ao salvar' });
+    res.status(500).json({ success: false, error: 'Erro ao salvar configurações' });
   }
 });
 
 // Rota Proxy para contornar CORS
-// O servidor faz a requisição para a API externa e retorna o resultado para o frontend
 app.get('/api/dashboard-data', async (req, res) => {
   try {
     // 1. Obter credenciais do banco
@@ -159,8 +163,9 @@ app.get('/api/dashboard-data', async (req, res) => {
     // @ts-ignore
     const config = rows[0];
 
+    // Se não tiver configuração, retorna 400 (Bad Request) em vez de crashar
     if (!config || !config.api_url || !config.api_token) {
-      return res.status(400).json({ error: 'Configurações de API não encontradas.' });
+      return res.status(400).json({ error: 'Configurações de API (URL/Token) não encontradas no banco de dados.' });
     }
 
     const baseUrl = config.api_url.replace(/\/$/, '').trim();
@@ -171,8 +176,8 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     console.log(`[Proxy] Buscando dados em: ${baseUrl}`);
 
-    // 2. Buscar dados no servidor externo (Node.js não tem CORS)
-    // Usamos Promise.allSettled para não falhar tudo se apenas um endpoint falhar
+    // 2. Buscar dados no servidor externo
+    // Adicionei tratamento de erro individual para cada fetch
     const [ticketsRes, attendantsRes] = await Promise.allSettled([
       fetch(`${baseUrl}/api/v1/atendimento`, { headers }), 
       fetch(`${baseUrl}/api/v1/atendente`, { headers })
@@ -181,28 +186,37 @@ app.get('/api/dashboard-data', async (req, res) => {
     let ticketsData = [];
     let attendantsData = [];
 
-    // Processar Atendimentos
-    if (ticketsRes.status === 'fulfilled') {
-       if (ticketsRes.value.ok) {
-         const json = await ticketsRes.value.json();
-         // Opa pode retornar array direto ou { data: [] }
-         ticketsData = Array.isArray(json) ? json : (json.data || json.items || []);
-       } else {
-         console.warn(`[Proxy] Erro API Tickets: ${ticketsRes.value.status}`);
-       }
-    } else {
-      console.error('[Proxy] Falha na requisição de tickets:', ticketsRes.reason);
-    }
+    // Helper para processar resposta
+    const processResponse = async (result, contextName) => {
+      if (result.status === 'fulfilled') {
+        const response = result.value;
+        if (response.ok) {
+          try {
+            const text = await response.text();
+            // Tenta parsear JSON
+            try {
+              const json = JSON.parse(text);
+              return Array.isArray(json) ? json : (json.data || json.items || []);
+            } catch (e) {
+              console.warn(`[Proxy] Resposta da API ${contextName} não é um JSON válido:`, text.substring(0, 100));
+              return [];
+            }
+          } catch (e) {
+            console.error(`[Proxy] Erro ao ler corpo da resposta ${contextName}:`, e);
+            return [];
+          }
+        } else {
+          console.warn(`[Proxy] Erro HTTP API ${contextName}: ${response.status} ${response.statusText}`);
+          return [];
+        }
+      } else {
+        console.error(`[Proxy] Falha na conexão ${contextName}:`, result.reason);
+        return [];
+      }
+    };
 
-    // Processar Atendentes
-    if (attendantsRes.status === 'fulfilled') {
-       if (attendantsRes.value.ok) {
-         const json = await attendantsRes.value.json();
-         attendantsData = Array.isArray(json) ? json : (json.data || []);
-       } else {
-         console.warn(`[Proxy] Erro API Atendentes: ${attendantsRes.value.status}`);
-       }
-    }
+    ticketsData = await processResponse(ticketsRes, 'Tickets');
+    attendantsData = await processResponse(attendantsRes, 'Atendentes');
 
     // 3. Retornar dados combinados para o frontend
     res.json({
@@ -212,12 +226,17 @@ app.get('/api/dashboard-data', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[Proxy] Erro geral:', error);
-    res.status(500).json({ error: 'Erro interno no servidor proxy.' });
+    // Retorna o erro detalhado para o frontend poder debugar no "Network Tab"
+    console.error('[Proxy] Erro Crítico 500:', error);
+    res.status(500).json({ 
+      error: 'Erro interno no servidor proxy.', 
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
-// SPA Fallback - Para qualquer rota não-API, serve o index.html
+// SPA Fallback
 app.get('*', (req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
