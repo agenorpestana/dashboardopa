@@ -13,7 +13,6 @@ const __dirname = dirname(__filename);
 dotenv.config();
 
 // IMPORTANTE: Ignora erros de certificado SSL auto-assinados ou inválidos na API de destino
-// Isso resolve a maioria dos erros "fetch failed" em ambientes corporativos
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const app = express();
@@ -155,7 +154,7 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// Rota Proxy para contornar CORS
+// Rota Proxy para contornar CORS e Filtrar Dados
 app.get('/api/dashboard-data', async (req, res) => {
   try {
     // 1. Obter credenciais do banco
@@ -163,9 +162,9 @@ app.get('/api/dashboard-data', async (req, res) => {
     // @ts-ignore
     const config = rows[0];
 
-    // Se não tiver configuração, retorna 400 (Bad Request) em vez de crashar
+    // Se não tiver configuração
     if (!config || !config.api_url || !config.api_token) {
-      return res.status(400).json({ error: 'Configurações de API (URL/Token) não encontradas no banco de dados.' });
+      return res.status(400).json({ error: 'Configurações de API não encontradas.' });
     }
 
     const baseUrl = config.api_url.replace(/\/$/, '').trim();
@@ -174,64 +173,77 @@ app.get('/api/dashboard-data', async (req, res) => {
       'Content-Type': 'application/json'
     };
 
-    console.log(`[Proxy] Buscando dados em: ${baseUrl}`);
+    console.log(`[Proxy] Iniciando busca filtrada em: ${baseUrl}`);
 
-    // 2. Buscar dados no servidor externo
-    // Adicionei tratamento de erro individual para cada fetch
-    const [ticketsRes, attendantsRes] = await Promise.allSettled([
-      fetch(`${baseUrl}/api/v1/atendimento`, { headers }), 
-      fetch(`${baseUrl}/api/v1/atendente`, { headers })
-    ]);
+    // 2. Definir URLs específicas para buscar APENAS tickets abertos
+    // Isso evita trazer o histórico de 50.000 chamados finalizados
+    const endpoints = [
+      `${baseUrl}/api/v1/atendimento?status=EA`, // Em Atendimento
+      `${baseUrl}/api/v1/atendimento?status=A`,  // Aberto (Fila)
+      `${baseUrl}/api/v1/atendimento?status=P`,  // Pendente
+      `${baseUrl}/api/v1/atendente`               // Agentes
+    ];
 
-    let ticketsData = [];
+    // 3. Executar chamadas em paralelo
+    const responses = await Promise.allSettled(endpoints.map(url => fetch(url, { headers })));
+
     let attendantsData = [];
+    let ticketsEA = [];
+    let ticketsA = [];
+    let ticketsP = [];
 
-    // Helper para processar resposta
-    const processResponse = async (result, contextName) => {
-      if (result.status === 'fulfilled') {
-        const response = result.value;
-        if (response.ok) {
-          try {
-            const text = await response.text();
-            // Tenta parsear JSON
-            try {
-              const json = JSON.parse(text);
-              return Array.isArray(json) ? json : (json.data || json.items || []);
-            } catch (e) {
-              console.warn(`[Proxy] Resposta da API ${contextName} não é um JSON válido:`, text.substring(0, 100));
-              return [];
-            }
-          } catch (e) {
-            console.error(`[Proxy] Erro ao ler corpo da resposta ${contextName}:`, e);
-            return [];
-          }
-        } else {
-          console.warn(`[Proxy] Erro HTTP API ${contextName}: ${response.status} ${response.statusText}`);
+    // Helper para extrair JSON de forma segura
+    const safeJson = async (result, label) => {
+      if (result.status === 'fulfilled' && result.value.ok) {
+        try {
+          const json = await result.value.json();
+          const data = Array.isArray(json) ? json : (json.data || json.items || []);
+          console.log(`[Proxy] ${label}: ${data.length} itens recuperados.`);
+          return data;
+        } catch (e) {
+          console.error(`[Proxy] Erro parse JSON ${label}:`, e.message);
           return [];
         }
-      } else {
-        console.error(`[Proxy] Falha na conexão ${contextName}:`, result.reason);
-        return [];
       }
+      if (result.status === 'fulfilled' && !result.value.ok) {
+        console.warn(`[Proxy] Falha HTTP ${label}: ${result.value.status}`);
+      }
+      return [];
     };
 
-    ticketsData = await processResponse(ticketsRes, 'Tickets');
-    attendantsData = await processResponse(attendantsRes, 'Atendentes');
+    // Extrair dados
+    ticketsEA = await safeJson(responses[0], 'Tickets (EA)');
+    ticketsA  = await safeJson(responses[1], 'Tickets (A)');
+    ticketsP  = await safeJson(responses[2], 'Tickets (P)');
+    attendantsData = await safeJson(responses[3], 'Atendentes');
 
-    // 3. Retornar dados combinados para o frontend
+    // 4. Combinar e Remover Duplicatas
+    // (Caso um ticket mude de status durante a requisição, ou a API retorne sobreposição)
+    const allTickets = [...ticketsEA, ...ticketsA, ...ticketsP];
+    
+    // Deduplicação por ID
+    const uniqueTicketsMap = new Map();
+    allTickets.forEach(t => {
+      const id = t._id || t.id;
+      if (id) uniqueTicketsMap.set(String(id), t);
+    });
+
+    const uniqueTickets = Array.from(uniqueTicketsMap.values());
+
+    console.log(`[Proxy] Total consolidado de tickets ativos: ${uniqueTickets.length}`);
+
+    // 5. Retornar
     res.json({
       success: true,
-      tickets: ticketsData,
+      tickets: uniqueTickets,
       attendants: attendantsData
     });
 
   } catch (error) {
-    // Retorna o erro detalhado para o frontend poder debugar no "Network Tab"
     console.error('[Proxy] Erro Crítico 500:', error);
     res.status(500).json({ 
       error: 'Erro interno no servidor proxy.', 
-      details: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      details: error.message
     });
   }
 });
