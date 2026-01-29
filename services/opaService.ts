@@ -1,12 +1,11 @@
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
-// Mock Data Generators (Mantido para fallback)
+// Mock Data Generators (Fallback)
 const NAMES = ['Maria Silva', 'João Souza', 'Ana Pereira', 'Carlos Oliveira'];
 const CONTACTS = ['maria@exemplo.com', '11999998888', 'ana.p@company.com', 'carlos@tech.br'];
 const ATTENDANTS = ['Pedro Suporte', 'Julia Atendimento', 'Marcos Vendas'];
 
 function generateMockTickets(): Ticket[] {
-  // ... (Geração de Mock simplificada para economizar espaço, lógica mantida)
   return Array.from({ length: 5 }).map((_, i) => ({
       id: `MOCK-${i}`,
       protocol: `TEST-${i}`,
@@ -35,23 +34,12 @@ function calculateSeconds(dateStr?: string): number {
   return Math.max(0, Math.floor((now - start) / 1000));
 }
 
-// Mapeia Status (Baseado na DOC Oficial: EA = Em Atendimento, F = Finalizado)
+// Mapeia Status
 function mapApiStatus(statusRaw?: any): TicketStatus {
   if (!statusRaw) return 'waiting'; 
-
   const s = String(statusRaw).toUpperCase().trim();
-
-  // EA = Em Atendimento
-  if (s === 'EA' || s === 'EM ATENDIMENTO' || s === '2') {
-    return 'in_service';
-  }
-  
-  // F = Finalizado
-  if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') {
-    return 'finished';
-  }
-  
-  // Qualquer outra coisa assumimos que é Fila/Aberto (Ex: 'A', 'P', '1')
+  if (s === 'EA' || s === 'EM ATENDIMENTO' || s === '2') return 'in_service';
+  if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
   return 'waiting';
 }
 
@@ -69,30 +57,57 @@ export const opaService = {
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
         if(rawTickets.length > 0) console.log('[OpaService] Exemplo:', rawTickets[0]);
 
-        // Mapeamento Oficial
+        // 1. Criar mapa de Atendentes (ID -> Nome)
+        // Isso é necessário porque o ticket pode trazer apenas o ID string "5d16..."
+        const attendantMap = new Map<string, string>();
+        
+        let attendants: Attendant[] = rawAttendants.map((a: any) => {
+          const id = String(a._id || a.id);
+          const name = a.nome || a.name || 'Agente';
+          attendantMap.set(id, name);
+          
+          return {
+            id,
+            name,
+            status: (a.status === 'ativo' || a.is_online || a.situacao === 1) ? 'online' : 'busy',
+            activeChats: 0 
+          };
+        });
+
+        // 2. Mapear Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            const rawStatus = t.status || t.situacao;
            const status = mapApiStatus(rawStatus);
-           const dateField = t.date || t.data_criacao; // DOC diz 'date'
+           const dateField = t.date || t.data_criacao; 
 
-           // Extração segura de Cliente (Doc diz que id_cliente é objeto)
+           // Cliente e Contato
            let clientName = 'Cliente';
            let contact = 'N/A';
 
-           if (typeof t.id_cliente === 'object' && t.id_cliente !== null) {
+           if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || contact;
            } else if (t.client_name) {
               clientName = t.client_name;
            }
+           
+           // Se contato ainda é N/A, tenta pegar do canal (ex: whatsapp ID)
+           if (contact === 'N/A' && t.canal_cliente) {
+              contact = t.canal_cliente.split('@')[0]; // Remove sufixo do whatsapp se houver
+           }
 
-           // Extração segura de Atendente
+           // Atendente: Tenta pegar objeto, senão busca no mapa, senão usa 'Atendente'
            let attendantName = undefined;
-           if (typeof t.id_atendente === 'object' && t.id_atendente !== null) {
+           if (t.id_atendente && typeof t.id_atendente === 'object') {
               attendantName = t.id_atendente.nome;
-           } else if (typeof t.id_atendente === 'string') {
-             // Caso venha só ID, tentamos pegar de outro campo ou deixamos vazio
-             attendantName = t.attendant_name || 'Atendente';
+           } else if (t.id_atendente) {
+              // Busca no mapa criado acima
+              attendantName = attendantMap.get(String(t.id_atendente));
+           }
+
+           // Se não achou nome mas tem ID, exibe o ID encurtado (debug) ou "Atendente"
+           if (!attendantName && t.id_atendente) {
+              attendantName = "Atendente"; 
            }
 
            return {
@@ -108,18 +123,10 @@ export const opaService = {
            };
         });
 
-        // Filtrar 'finished' e retornar
+        // 3. Filtrar finalizados
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // Mapear Atendentes
-        let attendants: Attendant[] = rawAttendants.map((a: any) => ({
-          id: String(a._id || a.id),
-          name: a.nome || a.name || 'Agente',
-          status: (a.status === 'ativo' || a.is_online) ? 'online' : 'busy',
-          activeChats: 0 // Será calculado abaixo
-        }));
-        
-        // Se não vieram atendentes da API, extrair dos tickets ativos
+        // 4. Se não veio lista de atendentes da API, improvisar com base nos tickets ativos
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {

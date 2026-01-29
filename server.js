@@ -239,11 +239,14 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = normalizeUrl(config.api_url);
     const token = config.api_token.trim();
 
-    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento (Custom HTTPS Request)`);
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
 
-    // Payload conforme documentação
+    // Payload conforme documentação: LIMIT e SORT para pegar os mais novos
     const payload = {
-       "options": { "limit": 100 }
+       "options": { 
+          "limit": 100,
+          "sort": "-_id" // Tenta ordenar por ID decrescente (mais novos primeiro)
+       }
     };
 
     // Busca Paralela
@@ -261,7 +264,6 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     // Processar Tickets
     if (ticketsRes.ok && ticketsRes.data) {
-      // API response structure: { data: [...] } or [...]
       if (Array.isArray(ticketsRes.data.data)) {
         tickets = ticketsRes.data.data;
       } else if (Array.isArray(ticketsRes.data)) {
@@ -272,10 +274,11 @@ app.get('/api/dashboard-data', async (req, res) => {
       console.warn(`[Proxy] Falha Tickets: ${ticketsRes.error}`);
       debugMsg += `Tickets: ${ticketsRes.error} `;
       
-      // Fallback: Tenta sem body (algumas versões mais recentes)
+      // Fallback
       if (ticketsRes.status === 400 || ticketsRes.status === 403) {
          console.log('[Proxy] Tentando fallback sem body...');
-         const fallbackRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=50`, 'GET', token, null);
+         // Adiciona sort na URL também
+         const fallbackRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=50&sort=-_id`, 'GET', token, null);
          if (fallbackRes.ok && fallbackRes.data) {
             const fbData = Array.isArray(fallbackRes.data.data) ? fallbackRes.data.data : fallbackRes.data;
             if (Array.isArray(fbData)) {
