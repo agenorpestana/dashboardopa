@@ -5,6 +5,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import https from 'https';
+import http from 'http';
+import { URL } from 'url';
 
 // Configuração para obter __dirname em módulos ES
 const __filename = fileURLToPath(import.meta.url);
@@ -160,6 +163,68 @@ const normalizeUrl = (url) => {
   return clean;
 };
 
+// Helper: Request with Body for GET (Opa Suite Requirement)
+function requestWithBody(urlStr, method, token, bodyData = null) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlStr);
+      const lib = url.protocol === 'https:' ? https : http;
+      
+      const bodyString = bodyData ? JSON.stringify(bodyData) : '';
+
+      const options = {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Content-Length': Buffer.byteLength(bodyString)
+        },
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname + url.search,
+        rejectUnauthorized: false
+      };
+
+      const req = lib.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          let parsedData = null;
+          let error = null;
+          
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+             try {
+                parsedData = JSON.parse(data);
+             } catch (e) {
+                error = 'JSON Parse Error';
+             }
+          } else {
+             error = `HTTP ${res.statusCode}: ${data.substring(0, 100)}`;
+          }
+
+          resolve({ 
+            ok: !error, 
+            status: res.statusCode, 
+            data: parsedData,
+            error: error 
+          });
+        });
+      });
+
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      
+      if (bodyString) {
+        req.write(bodyString);
+      }
+      req.end();
+
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
+    }
+  });
+}
+
 // Rota Proxy Principal
 app.get('/api/dashboard-data', async (req, res) => {
   try {
@@ -172,22 +237,22 @@ app.get('/api/dashboard-data', async (req, res) => {
     }
 
     const baseUrl = normalizeUrl(config.api_url);
-    const headers = { 
-      'Authorization': `Bearer ${config.api_token.trim()}`,
-      'Content-Type': 'application/json',
-      'User-Agent': 'OpaDashboard/1.0' // Alguns firewalls bloqueiam fetch sem User-Agent
+    const token = config.api_token.trim();
+
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento (Custom HTTPS Request)`);
+
+    // Payload conforme documentação
+    const payload = {
+       "options": { "limit": 100 }
     };
 
-    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
-
-    // Busca Paralela: Atendimentos e Atendentes
+    // Busca Paralela
     const [ticketsRes, attendantsRes] = await Promise.all([
-      // 1. Tickets: Usamos limite alto via URL query (tentativa de compatibilidade)
-      // Se a API ignorar o query string, ela retornará os default (recentes), o que é OK.
-      fetch(`${baseUrl}/api/v1/atendimento?limit=100`, { headers }).then(r => r.json().catch(() => ({ error: 'Parse Error' }))),
+      // 1. Tickets (GET com Body)
+      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payload),
       
-      // 2. Atendentes
-      fetch(`${baseUrl}/api/v1/atendente`, { headers }).then(r => r.json().catch(() => ({ error: 'Parse Error' })))
+      // 2. Atendentes (GET simples)
+      requestWithBody(`${baseUrl}/api/v1/atendente`, 'GET', token, null)
     ]);
 
     let tickets = [];
@@ -195,21 +260,41 @@ app.get('/api/dashboard-data', async (req, res) => {
     let debugMsg = "";
 
     // Processar Tickets
-    if (ticketsRes && ticketsRes.data && Array.isArray(ticketsRes.data)) {
-      tickets = ticketsRes.data;
-      console.log(`[Proxy] Tickets encontrados: ${tickets.length}`);
-    } else if (Array.isArray(ticketsRes)) {
-      tickets = ticketsRes; // Algumas versões retornam array direto
+    if (ticketsRes.ok && ticketsRes.data) {
+      // API response structure: { data: [...] } or [...]
+      if (Array.isArray(ticketsRes.data.data)) {
+        tickets = ticketsRes.data.data;
+      } else if (Array.isArray(ticketsRes.data)) {
+        tickets = ticketsRes.data;
+      }
+      console.log(`[Proxy] Tickets obtidos com sucesso: ${tickets.length}`);
     } else {
-      debugMsg += `Tickets Error: ${JSON.stringify(ticketsRes)} `;
-      console.warn('[Proxy] Resposta inesperada tickets:', ticketsRes);
+      console.warn(`[Proxy] Falha Tickets: ${ticketsRes.error}`);
+      debugMsg += `Tickets: ${ticketsRes.error} `;
+      
+      // Fallback: Tenta sem body (algumas versões mais recentes)
+      if (ticketsRes.status === 400 || ticketsRes.status === 403) {
+         console.log('[Proxy] Tentando fallback sem body...');
+         const fallbackRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=50`, 'GET', token, null);
+         if (fallbackRes.ok && fallbackRes.data) {
+            const fbData = Array.isArray(fallbackRes.data.data) ? fallbackRes.data.data : fallbackRes.data;
+            if (Array.isArray(fbData)) {
+               tickets = fbData;
+               debugMsg += "(Recovered via Fallback)";
+            }
+         }
+      }
     }
 
     // Processar Atendentes
-    if (attendantsRes && attendantsRes.data && Array.isArray(attendantsRes.data)) {
-      attendants = attendantsRes.data;
-    } else if (Array.isArray(attendantsRes)) {
-      attendants = attendantsRes;
+    if (attendantsRes.ok && attendantsRes.data) {
+      if (Array.isArray(attendantsRes.data.data)) {
+        attendants = attendantsRes.data.data;
+      } else if (Array.isArray(attendantsRes.data)) {
+        attendants = attendantsRes.data;
+      }
+    } else {
+        debugMsg += `Attendants: ${attendantsRes.error} `;
     }
 
     // Retornar para o frontend
@@ -224,7 +309,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[Proxy] Erro:', error);
+    console.error('[Proxy] Erro Crítico:', error);
     res.status(500).json({ error: error.message });
   }
 });
