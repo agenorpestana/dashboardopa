@@ -109,21 +109,41 @@ export const opaService = {
            const status = mapApiStatus(rawStatus);
            const dateField = t.date || t.data_criacao; 
 
-           // Cliente e Contato
-           let clientName = 'Cliente';
-           let contact = 'N/A';
-           
            // Extrai contato do canal se disponível (ex: 55119999@c.us)
            let channelContact = '';
            if (t.canal_cliente) {
               channelContact = t.canal_cliente.split('@')[0];
            }
 
-           // Tenta pegar dados do objeto id_cliente se existir
+           // --- Lógica de Prioridade de Nome ---
+           let clientName = 'Cliente';
+           let contact = 'N/A';
+           
+           // 1. Prioridade: Campo "id_cliente" populado (objeto)
            if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
-           } else if (t.client_name) {
+           } 
+           // 2. Prioridade: Campo "cliente" explícito
+           else if (t.cliente && typeof t.cliente === 'object' && t.cliente.nome) {
+              clientName = t.cliente.nome;
+           }
+           // 3. Prioridade: Campo "nome_cliente" (snake_case) na raiz
+           else if (t.nome_cliente) {
+              clientName = t.nome_cliente;
+           }
+           // 4. Prioridade: Dados de "origem" (geralmente Push Name do WhatsApp)
+           else if (t.origem && typeof t.origem === 'object') {
+              if (t.origem.nome) {
+                 clientName = t.origem.nome;
+              } else if (t.origem.apelido) {
+                 clientName = t.origem.apelido;
+              } else if (t.origem.senderName) {
+                 clientName = t.origem.senderName;
+              }
+           }
+           // 5. Fallback para nome antigo se existir
+           else if (t.client_name) {
               clientName = t.client_name;
            }
 
@@ -132,9 +152,9 @@ export const opaService = {
               contact = channelContact;
            }
            
-           // Se o nome for genérico e tivermos o contato, usa o contato formatado como nome
-           if (clientName === 'Cliente' && contact !== 'N/A') {
-              // Se parece ser um telefone, formata
+           // Se o nome ainda for genérico "Cliente" E tivermos o contato, usamos o contato formatado como último recurso
+           // Mas apenas se realmente não achamos nenhum nome acima.
+           if ((clientName === 'Cliente' || !clientName) && contact !== 'N/A') {
               if (contact.startsWith('55') && contact.length >= 12) {
                  clientName = formatPhoneNumber(contact);
               } else {
@@ -157,7 +177,7 @@ export const opaService = {
            return {
               id: String(t._id || t.id),
               protocol: t.protocolo || 'N/A',
-              clientName,
+              clientName: clientName || 'Cliente',
               contact: formatPhoneNumber(contact),
               waitTimeSeconds: calculateSeconds(dateField),
               durationSeconds: (status === 'in_service') ? calculateSeconds(dateField) : undefined,

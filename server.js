@@ -251,29 +251,34 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
 
-    // TENTATIVA 1: Filtro otimizado (Status != 'F')
-    // Aumentei o limit para 500 para garantir que pegue tickets ativos se tiver muito tráfego
+    // TENTATIVA 1: Filtro Otimizado
+    // Adicionado "populate": ["id_cliente"] para trazer o nome do cliente em vez do ID
     const payloadOptimized = {
        "filter": {
           "dataInicialAbertura": startDate,
-          "status": { "$ne": "F" } // Tenta filtrar os finalizados direto no banco
+          "status": { "$ne": "F" }
        },
        "options": { 
           "limit": 500,
-          "sort": "-_id" 
+          "sort": "-_id",
+          "populate": ["id_cliente"]
        }
     };
     
-    // Payload de Fallback (apenas data)
+    // Payload de Fallback
     const payloadFallback = {
         "filter": { "dataInicialAbertura": startDate },
-        "options": { "limit": 300, "sort": "-_id" }
+        "options": { 
+           "limit": 300, 
+           "sort": "-_id",
+           "populate": ["id_cliente"]
+        }
     };
 
     // Busca de Atendentes
     const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/atendente`, 'GET', token, null);
     
-    // Busca de Tickets (Primeira tentativa com filtro de status)
+    // Busca de Tickets
     let ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadOptimized);
 
     let tickets = [];
@@ -282,16 +287,16 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     // Lógica de Fallback para Tickets
     if (!ticketsRes.ok || (ticketsRes.data && ticketsRes.data.length === 0)) {
-        console.warn(`[Proxy] Tentativa otimizada falhou ou retornou vazio (${ticketsRes.status}). Tentando fallback sem filtro de status...`);
+        console.warn(`[Proxy] Tentativa otimizada falhou ou retornou vazio (${ticketsRes.status}). Tentando fallback...`);
         debugMsg += "Optimized failed. ";
         
-        // Tenta sem o filtro $ne (algumas versões do Opa não suportam)
+        // Tenta sem o filtro $ne
         ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadFallback);
         
-        // Se ainda falhar, tenta sem body nenhum (último recurso)
+        // Se ainda falhar, tenta sem body nenhum
         if (!ticketsRes.ok && (ticketsRes.status === 400 || ticketsRes.status === 403)) {
            debugMsg += "Fallback failed. Trying simple GET. ";
-           ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=200&sort=-_id`, 'GET', token, null);
+           ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=200&sort=-_id&populate=id_cliente`, 'GET', token, null);
         }
     }
 
