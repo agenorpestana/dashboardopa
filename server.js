@@ -280,14 +280,20 @@ app.get('/api/dashboard-data', async (req, res) => {
         "options": { "limit": 100 }
     };
     
-    // Busca de Clientes (Novo)
+    // Busca de Clientes (Base de Cadastro)
     const clientsPayload = {
+        "options": { "limit": 500, "sort": "-_id" }
+    };
+    
+    // Busca de Contatos (Base de Agenda) - NOVO
+    const contactsPayload = {
         "options": { "limit": 500, "sort": "-_id" }
     };
 
     // Executa Promises
     const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, attendantsPayload);
     const clientsPromise = requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, clientsPayload);
+    const contactsPromise = requestWithBody(`${baseUrl}/api/v1/contato`, 'GET', token, contactsPayload);
     
     // Busca de Tickets
     let ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadOptimized);
@@ -295,6 +301,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     let tickets = [];
     let attendants = [];
     let clients = [];
+    let contacts = [];
     let debugMsg = "";
 
     // Lógica de Fallback para Tickets
@@ -345,13 +352,25 @@ app.get('/api/dashboard-data', async (req, res) => {
       }
       console.log(`[Proxy] Clientes obtidos: ${clients.length}`);
     }
+    
+    // Processar resposta de Contatos
+    const contactsRes = await contactsPromise;
+    if (contactsRes.ok && contactsRes.data) {
+      if (Array.isArray(contactsRes.data.data)) {
+        contacts = contactsRes.data.data;
+      } else if (Array.isArray(contactsRes.data)) {
+        contacts = contactsRes.data;
+      }
+      console.log(`[Proxy] Contatos obtidos: ${contacts.length}`);
+    }
 
     // Retornar para o frontend
     res.json({
       success: true,
       tickets: tickets,
       attendants: attendants,
-      clients: clients, // Enviando lista de clientes
+      clients: clients, 
+      contacts: contacts, // Lista de contatos da agenda
       debug_info: {
         msg: debugMsg,
         tickets_raw_count: tickets.length

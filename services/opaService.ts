@@ -84,6 +84,7 @@ export const opaService = {
         const rawTickets = data.tickets || [];
         const rawAttendants = data.attendants || [];
         const rawClients = data.clients || [];
+        const rawContacts = data.contacts || [];
 
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
         if(rawTickets.length > 0) console.log('[OpaService] Exemplo:', rawTickets[0]);
@@ -116,7 +117,22 @@ export const opaService = {
              clientMap.set(id, name);
         });
 
-        // 3. Mapear Tickets
+        // 3. Criar mapa de Contatos (Telefone -> Nome)
+        // Isso resolve quando o ticket vem apenas com número, buscamos na agenda.
+        const phoneMap = new Map<string, string>();
+        rawContacts.forEach((c: any) => {
+             if (c.nome && Array.isArray(c.fones)) {
+                 c.fones.forEach((f: any) => {
+                     if (f.numero) {
+                         // Normaliza removendo tudo que não for número para facilitar o match
+                         const cleanPhone = String(f.numero).replace(/\D/g, '');
+                         phoneMap.set(cleanPhone, c.nome);
+                     }
+                 });
+             }
+        });
+
+        // 4. Mapear Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            const rawStatus = t.status || t.situacao;
            const status = mapApiStatus(rawStatus);
@@ -158,15 +174,27 @@ export const opaService = {
               clientName = t.client_name;
            }
 
+           // Definição do Contato (Telefone/Email)
            if (contact === 'N/A' && channelContact) {
               contact = channelContact;
            }
            
-           if ((clientName === 'Cliente' || !clientName) && contact !== 'N/A') {
-              if (contact.startsWith('55') && contact.length >= 12) {
-                 clientName = formatPhoneNumber(contact);
+           // Validação Final e Tentativa de Recuperação pelo Mapa de Contatos
+           // Se o nome for 'Cliente', vazio, ou parecer um número de telefone
+           const isNameNumeric = /^\d+$/.test(clientName.replace(/\D/g, ''));
+           
+           if ((clientName === 'Cliente' || !clientName || isNameNumeric) && contact !== 'N/A') {
+              // Tenta achar pelo telefone na agenda de contatos
+              const ticketPhone = contact.replace(/\D/g, '');
+              if (phoneMap.has(ticketPhone)) {
+                 clientName = phoneMap.get(ticketPhone)!;
               } else {
-                 clientName = contact;
+                 // Se não achar na agenda, formata o número para exibir bonitinho
+                 if (contact.startsWith('55') && contact.length >= 12) {
+                    clientName = formatPhoneNumber(contact);
+                 } else {
+                    clientName = contact;
+                 }
               }
            }
 
@@ -196,10 +224,10 @@ export const opaService = {
            };
         });
 
-        // 4. Filtrar finalizados
+        // 5. Filtrar finalizados
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // 5. Calcular Chats Ativos por Atendente
+        // 6. Calcular Chats Ativos por Atendente
         activeTickets.forEach(t => {
            if (t.status === 'in_service' && t.attendantName) {
               const att = attendants.find(a => a.name === t.attendantName);
@@ -209,7 +237,7 @@ export const opaService = {
            }
         });
 
-        // 6. Fallback se não veio lista de atendentes
+        // 7. Fallback se não veio lista de atendentes
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {
