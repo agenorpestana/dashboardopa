@@ -75,11 +75,11 @@ function mapApiStatus(statusRaw?: any): TicketStatus {
   if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) return 'in_service';
   
   // Com o Bot ('AG')
-  if (['AG', 'AGUARDANDO', 'BOT'].includes(s)) return 'bot';
+  if (['AG', 'PS', 'AGUARDANDO', 'BOT'].includes(s)) return 'bot';
 
   // Em Espera ('E', 'EE')
   // 'A' removido propositalmente para filtrar apenas status de fila reais
-  if (['E', 'A', 'PS', 'EM ESPERA', '1', 'T'].includes(s)) return 'waiting';
+  if (['E', 'A', 'EM ESPERA', '1', 'T'].includes(s)) return 'waiting';
   
   // Finalizado
   if (['F', 'FINALIZADO', '3', '4'].includes(s)) return 'finished';
