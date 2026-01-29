@@ -154,6 +154,17 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// Helper para normalizar URL e evitar duplicação de sufixos
+const normalizeUrl = (url) => {
+  if (!url) return '';
+  let clean = url.trim().replace(/\/$/, '');
+  // Se o usuário colocou /api/v1 ou /api no final, removemos para adicionar corretamente depois
+  // Isso evita http://site.com/api/v1/api/v1/atendimento
+  clean = clean.replace(/\/api\/v1$/, '');
+  clean = clean.replace(/\/api$/, '');
+  return clean;
+};
+
 // Rota Proxy para contornar CORS e Filtrar Dados
 app.get('/api/dashboard-data', async (req, res) => {
   try {
@@ -167,46 +178,60 @@ app.get('/api/dashboard-data', async (req, res) => {
       return res.status(400).json({ error: 'Configurações de API não encontradas.' });
     }
 
-    const baseUrl = config.api_url.replace(/\/$/, '').trim();
+    const baseUrl = normalizeUrl(config.api_url);
     const headers = { 
       'Authorization': `Bearer ${config.api_token.trim()}`,
       'Content-Type': 'application/json'
     };
 
-    console.log(`[Proxy] Iniciando busca robusta em: ${baseUrl}`);
+    console.log(`[Proxy] Iniciando busca em BaseURL: ${baseUrl}`);
 
-    // 2. Definir URLs Variadas
-    // Algumas versões usam status (texto), outras situacao (int)
-    const endpoints = [
-      // 1. Tentar por Códigos Numéricos (Mais confiável em versões recentes)
-      // 2 = Em Atendimento, 1 = Pendente/Fila
-      { url: `${baseUrl}/api/v1/atendimento?situacao=2`, label: 'Situação 2 (Atendimento)' },
-      { url: `${baseUrl}/api/v1/atendimento?situacao=1`, label: 'Situação 1 (Fila)' },
+    // 2. Definir Endpoints
+    // Estratégia: Buscar Singular e Plural, com diversos filtros de status
+    const basePaths = ['/api/v1/atendimento', '/api/v1/atendimentos'];
+    const endpoints = [];
+
+    // Gerar combinações
+    basePaths.forEach(path => {
+      // Prioridade 1: Status Numéricos (Comum em versões recentes)
+      endpoints.push({ url: `${baseUrl}${path}?situacao=2`, label: `${path}?situacao=2` }); // Em atendimento
+      endpoints.push({ url: `${baseUrl}${path}?situacao=1`, label: `${path}?situacao=1` }); // Aguardando
       
-      // 2. Tentar por Siglas (Versões antigas ou específicas)
-      { url: `${baseUrl}/api/v1/atendimento?status=EA`, label: 'Status EA' },
-      { url: `${baseUrl}/api/v1/atendimento?status=A`,  label: 'Status A' },
-      { url: `${baseUrl}/api/v1/atendimento?status=P`,  label: 'Status P' },
-      
-      // 3. Atendentes
-      { url: `${baseUrl}/api/v1/atendente`, label: 'Atendentes' }
-    ];
+      // Prioridade 2: Siglas
+      endpoints.push({ url: `${baseUrl}${path}?status=EA`, label: `${path}?status=EA` });
+      endpoints.push({ url: `${baseUrl}${path}?status=A`, label: `${path}?status=A` });
+
+      // Prioridade 3: Listar Recentes (Fallback para descobrir status)
+      endpoints.push({ url: `${baseUrl}${path}?limit=20&sort=-id`, label: `${path} (Recent)` });
+    });
+
+    // Adicionar Atendentes
+    endpoints.push({ url: `${baseUrl}/api/v1/atendente`, label: 'Atendentes' });
+    endpoints.push({ url: `${baseUrl}/api/v1/usuarios?cargo=atendente`, label: 'Usuários (Atendentes)' });
 
     // 3. Executar chamadas em paralelo
     const requests = endpoints.map(ep => 
       fetch(ep.url, { headers })
         .then(async r => {
-           if (!r.ok) return { label: ep.label, error: r.status, items: [] };
+           // Se não for OK (ex: 404 porque endpoint não existe), retorna erro
+           if (!r.ok) return { label: ep.label, error: `${r.status} ${r.statusText}`, items: [] };
+           
            try {
-             const json = await r.json();
+             const text = await r.text();
+             // Verificar se é HTML (comum quando URL base está errada e aponta para frontend)
+             if (text.trim().startsWith('<')) {
+                return { label: ep.label, error: 'Response is HTML (Wrong URL?)', items: [] };
+             }
+
+             const json = JSON.parse(text);
              // Tenta encontrar o array de dados em várias propriedades comuns
              const items = Array.isArray(json) ? json : (json.data || json.items || json.payload || []);
              return { label: ep.label, ok: true, items };
            } catch(e) {
-             return { label: ep.label, error: 'JSON Parse', items: [] };
+             return { label: ep.label, error: `JSON Parse: ${e.message}`, items: [] };
            }
         })
-        .catch(e => ({ label: ep.label, error: e.message, items: [] }))
+        .catch(e => ({ label: ep.label, error: `NetError: ${e.message}`, items: [] }))
     );
 
     const results = await Promise.all(requests);
@@ -216,46 +241,20 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     // 4. Processar resultados
     results.forEach(res => {
-      if (res.label === 'Atendentes') {
-        attendantsData = res.items;
+      if (res.label.includes('Atendentes') || res.label.includes('Usuários')) {
+        // Se encontrou atendentes, usa. Se já tem, soma (dedup depois) ou substitui se for maior
+        if (res.items.length > attendantsData.length) {
+          attendantsData = res.items;
+        }
       } else {
         if (res.items.length > 0) {
-           console.log(`[Proxy] ${res.label}: ${res.items.length} tickets encontrados.`);
+           console.log(`[Proxy] ${res.label}: ${res.items.length} itens.`);
            allTickets = [...allTickets, ...res.items];
         }
       }
     });
 
-    // 5. Fallback Agressivo
-    // Se não encontramos NADA com os filtros, buscar os últimos 100 tickets sem filtro
-    if (allTickets.length === 0) {
-       console.log('[Proxy] Filtros específicos retornaram vazio. Executando Fallback Agressivo (100 recentes)...');
-       
-       // Tenta variações de ordenação
-       const fallbackUrls = [
-          `${baseUrl}/api/v1/atendimento?limit=100&sort=-id`, 
-          `${baseUrl}/api/v1/atendimento?limit=100&order=desc`
-       ];
-       
-       for (const url of fallbackUrls) {
-          if (allTickets.length > 0) break;
-          try {
-             const fbRes = await fetch(url, { headers });
-             if (fbRes.ok) {
-                const fbJson = await fbRes.json();
-                const fbItems = Array.isArray(fbJson) ? fbJson : (fbJson.data || fbJson.items || []);
-                if (fbItems.length > 0) {
-                   console.log(`[Proxy] Fallback via ${url} retornou ${fbItems.length} itens.`);
-                   allTickets = fbItems;
-                }
-             }
-          } catch (e) {
-             console.error('[Proxy] Erro no fallback:', e.message);
-          }
-       }
-    }
-
-    // 6. Deduplicação por ID
+    // 5. Deduplicação por ID
     const uniqueTicketsMap = new Map();
     allTickets.forEach(t => {
       const id = t._id || t.id;
@@ -264,16 +263,17 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const uniqueTickets = Array.from(uniqueTicketsMap.values());
 
-    console.log(`[Proxy] Total consolidado enviando para frontend: ${uniqueTickets.length}`);
+    console.log(`[Proxy] Total consolidado: ${uniqueTickets.length}`);
 
-    // 7. Retornar
+    // 6. Retornar
     res.json({
       success: true,
       tickets: uniqueTickets,
       attendants: attendantsData,
       debug_info: {
         total_fetched: uniqueTickets.length,
-        sources: results.map(r => `${r.label}: ${r.items.length}`).join(', ')
+        // Mostra ERRO se houver, para ajudar o usuário a debugar URL
+        sources: results.map(r => `${r.label}: ${r.error ? `ERR[${r.error}]` : r.items.length}`).join(' | ')
       }
     });
 
