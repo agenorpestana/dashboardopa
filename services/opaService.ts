@@ -79,7 +79,7 @@ function mapApiStatus(statusRaw?: any): TicketStatus {
 
   // Em Espera ('E', 'EE')
   // 'A' removido propositalmente para filtrar apenas status de fila reais
-  if (['E', 'EE', 'EM ESPERA', '1', 'T'].includes(s)) return 'waiting';
+  if (['E', 'A', 'EE', 'EM ESPERA', '1', 'T'].includes(s)) return 'waiting';
   
   // Finalizado
   if (['F', 'FINALIZADO', '3', '4'].includes(s)) return 'finished';
