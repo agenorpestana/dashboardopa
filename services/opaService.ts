@@ -58,7 +58,6 @@ export const opaService = {
         if(rawTickets.length > 0) console.log('[OpaService] Exemplo:', rawTickets[0]);
 
         // 1. Criar mapa de Atendentes (ID -> Nome)
-        // Isso é necessário porque o ticket pode trazer apenas o ID string "5d16..."
         const attendantMap = new Map<string, string>();
         
         let attendants: Attendant[] = rawAttendants.map((a: any) => {
@@ -83,17 +82,28 @@ export const opaService = {
            // Cliente e Contato
            let clientName = 'Cliente';
            let contact = 'N/A';
+           
+           // Extrai contato do canal se disponível (ex: 55119999@c.us)
+           let channelContact = '';
+           if (t.canal_cliente) {
+              channelContact = t.canal_cliente.split('@')[0];
+           }
 
            if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || clientName;
-              contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || contact;
+              contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
            } else if (t.client_name) {
               clientName = t.client_name;
            }
+
+           // Se contato ainda é N/A
+           if (contact === 'N/A' && channelContact) {
+              contact = channelContact;
+           }
            
-           // Se contato ainda é N/A, tenta pegar do canal (ex: whatsapp ID)
-           if (contact === 'N/A' && t.canal_cliente) {
-              contact = t.canal_cliente.split('@')[0]; // Remove sufixo do whatsapp se houver
+           // Se o nome for genérico e tivermos o contato, usa o contato como nome
+           if (clientName === 'Cliente' && contact !== 'N/A') {
+              clientName = contact;
            }
 
            // Atendente: Tenta pegar objeto, senão busca no mapa, senão usa 'Atendente'
@@ -101,11 +111,9 @@ export const opaService = {
            if (t.id_atendente && typeof t.id_atendente === 'object') {
               attendantName = t.id_atendente.nome;
            } else if (t.id_atendente) {
-              // Busca no mapa criado acima
               attendantName = attendantMap.get(String(t.id_atendente));
            }
 
-           // Se não achou nome mas tem ID, exibe o ID encurtado (debug) ou "Atendente"
            if (!attendantName && t.id_atendente) {
               attendantName = "Atendente"; 
            }
@@ -123,10 +131,10 @@ export const opaService = {
            };
         });
 
-        // 3. Filtrar finalizados
+        // 3. Filtrar finalizados (Frontend filter as safety net)
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // 4. Se não veio lista de atendentes da API, improvisar com base nos tickets ativos
+        // 4. Se não veio lista de atendentes da API, improvisar
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {

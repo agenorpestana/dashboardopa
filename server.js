@@ -246,36 +246,56 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = normalizeUrl(config.api_url);
     const token = config.api_token.trim();
 
-    // Data de início (Últimos 30 dias para pegar atendimentos abertos que podem estar parados, mas garantir que são recentes)
+    // Data de início: 30 dias atrás
     const startDate = getPastDate(30);
 
-    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento desde ${startDate}`);
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
 
-    // Payload com Filtro de Data
-    const payload = {
+    // TENTATIVA 1: Filtro otimizado (Status != 'F')
+    // Aumentei o limit para 500 para garantir que pegue tickets ativos se tiver muito tráfego
+    const payloadOptimized = {
        "filter": {
-          "dataInicialAbertura": startDate
+          "dataInicialAbertura": startDate,
+          "status": { "$ne": "F" } // Tenta filtrar os finalizados direto no banco
        },
        "options": { 
-          "limit": 300,
+          "limit": 500,
           "sort": "-_id" 
        }
     };
+    
+    // Payload de Fallback (apenas data)
+    const payloadFallback = {
+        "filter": { "dataInicialAbertura": startDate },
+        "options": { "limit": 300, "sort": "-_id" }
+    };
 
-    // Busca Paralela
-    const [ticketsRes, attendantsRes] = await Promise.all([
-      // 1. Tickets (GET com Body)
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payload),
-      
-      // 2. Atendentes (GET simples)
-      requestWithBody(`${baseUrl}/api/v1/atendente`, 'GET', token, null)
-    ]);
+    // Busca de Atendentes
+    const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/atendente`, 'GET', token, null);
+    
+    // Busca de Tickets (Primeira tentativa com filtro de status)
+    let ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadOptimized);
 
     let tickets = [];
     let attendants = [];
     let debugMsg = "";
 
-    // Processar Tickets
+    // Lógica de Fallback para Tickets
+    if (!ticketsRes.ok || (ticketsRes.data && ticketsRes.data.length === 0)) {
+        console.warn(`[Proxy] Tentativa otimizada falhou ou retornou vazio (${ticketsRes.status}). Tentando fallback sem filtro de status...`);
+        debugMsg += "Optimized failed. ";
+        
+        // Tenta sem o filtro $ne (algumas versões do Opa não suportam)
+        ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadFallback);
+        
+        // Se ainda falhar, tenta sem body nenhum (último recurso)
+        if (!ticketsRes.ok && (ticketsRes.status === 400 || ticketsRes.status === 403)) {
+           debugMsg += "Fallback failed. Trying simple GET. ";
+           ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=200&sort=-_id`, 'GET', token, null);
+        }
+    }
+
+    // Processar resposta de Tickets
     if (ticketsRes.ok && ticketsRes.data) {
       if (Array.isArray(ticketsRes.data.data)) {
         tickets = ticketsRes.data.data;
@@ -284,32 +304,17 @@ app.get('/api/dashboard-data', async (req, res) => {
       }
       console.log(`[Proxy] Tickets obtidos com sucesso: ${tickets.length}`);
     } else {
-      console.warn(`[Proxy] Falha Tickets: ${ticketsRes.error}`);
-      debugMsg += `Tickets: ${ticketsRes.error} `;
-      
-      // Fallback simples sem filtro (caso a API não aceite dataInicialAbertura)
-      if (ticketsRes.status === 400 || ticketsRes.status === 403 || tickets.length === 0) {
-         console.log('[Proxy] Tentando fallback sem filtro de data...');
-         const fallbackRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=100`, 'GET', token, null);
-         if (fallbackRes.ok && fallbackRes.data) {
-            const fbData = Array.isArray(fallbackRes.data.data) ? fallbackRes.data.data : fallbackRes.data;
-            if (Array.isArray(fbData)) {
-               tickets = fbData;
-               debugMsg += "(Recovered via Fallback)";
-            }
-         }
-      }
+      debugMsg += `Final Failure: ${ticketsRes.error}`;
     }
 
-    // Processar Atendentes
+    // Processar resposta de Atendentes
+    const attendantsRes = await attendantsPromise;
     if (attendantsRes.ok && attendantsRes.data) {
       if (Array.isArray(attendantsRes.data.data)) {
         attendants = attendantsRes.data.data;
       } else if (Array.isArray(attendantsRes.data)) {
         attendants = attendantsRes.data;
       }
-    } else {
-        debugMsg += `Attendants: ${attendantsRes.error} `;
     }
 
     // Retornar para o frontend
