@@ -68,7 +68,7 @@ function mapApiStatus(statusRaw?: any): TicketStatus {
   if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
   
   // Aguardando / Triagem / Pendente
-  if (s === 'A' || s === 'AGUARDANDO' || s === 'T' || s === '1') return 'waiting';
+  if (s === 'AG' || s === 'AGUARDANDO' || s === 'T' || s === '1') return 'waiting';
   
   return 'waiting';
 }
