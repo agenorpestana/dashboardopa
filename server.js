@@ -123,22 +123,19 @@ app.get('/api/settings', async (req, res) => {
   }
 });
 
-// Salvar Configurações (Requer senha para segurança extra)
+// Salvar Configurações
 app.post('/api/settings', async (req, res) => {
   const { username, password, api_url, api_token } = req.body;
 
   try {
-    // 1. Revalidar credenciais antes de permitir alteração
     const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
     // @ts-ignore
     const user = userRows[0];
 
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-      return res.status(403).json({ success: false, error: 'Credenciais inválidas para salvar alterações.' });
+      return res.status(403).json({ success: false, error: 'Credenciais inválidas.' });
     }
 
-    // 2. Salvar ou Atualizar
-    // Verifica se já existe config
     const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
     // @ts-ignore
     if (settingRows.length > 0) {
@@ -154,26 +151,22 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// Helper para normalizar URL e evitar duplicação de sufixos
+// Normalizador de URL
 const normalizeUrl = (url) => {
   if (!url) return '';
   let clean = url.trim().replace(/\/$/, '');
-  // Se o usuário colocou /api/v1 ou /api no final, removemos para adicionar corretamente depois
-  // Isso evita http://site.com/api/v1/api/v1/atendimento
   clean = clean.replace(/\/api\/v1$/, '');
   clean = clean.replace(/\/api$/, '');
   return clean;
 };
 
-// Rota Proxy para contornar CORS e Filtrar Dados
+// Rota Proxy Principal
 app.get('/api/dashboard-data', async (req, res) => {
   try {
-    // 1. Obter credenciais do banco
     const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
     // @ts-ignore
     const config = rows[0];
 
-    // Se não tiver configuração
     if (!config || !config.api_url || !config.api_token) {
       return res.status(400).json({ error: 'Configurações de API não encontradas.' });
     }
@@ -181,108 +174,58 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = normalizeUrl(config.api_url);
     const headers = { 
       'Authorization': `Bearer ${config.api_token.trim()}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'User-Agent': 'OpaDashboard/1.0' // Alguns firewalls bloqueiam fetch sem User-Agent
     };
 
-    console.log(`[Proxy] Iniciando busca em BaseURL: ${baseUrl}`);
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
 
-    // 2. Definir Endpoints
-    // Estratégia: Buscar Singular e Plural, com diversos filtros de status
-    const basePaths = ['/api/v1/atendimento', '/api/v1/atendimentos'];
-    const endpoints = [];
-
-    // Gerar combinações
-    basePaths.forEach(path => {
-      // Prioridade 1: Status Numéricos (Comum em versões recentes)
-      endpoints.push({ url: `${baseUrl}${path}?situacao=2`, label: `${path}?situacao=2` }); // Em atendimento
-      endpoints.push({ url: `${baseUrl}${path}?situacao=1`, label: `${path}?situacao=1` }); // Aguardando
+    // Busca Paralela: Atendimentos e Atendentes
+    const [ticketsRes, attendantsRes] = await Promise.all([
+      // 1. Tickets: Usamos limite alto via URL query (tentativa de compatibilidade)
+      // Se a API ignorar o query string, ela retornará os default (recentes), o que é OK.
+      fetch(`${baseUrl}/api/v1/atendimento?limit=100`, { headers }).then(r => r.json().catch(() => ({ error: 'Parse Error' }))),
       
-      // Prioridade 2: Siglas
-      endpoints.push({ url: `${baseUrl}${path}?status=EA`, label: `${path}?status=EA` });
-      endpoints.push({ url: `${baseUrl}${path}?status=A`, label: `${path}?status=A` });
+      // 2. Atendentes
+      fetch(`${baseUrl}/api/v1/atendente`, { headers }).then(r => r.json().catch(() => ({ error: 'Parse Error' })))
+    ]);
 
-      // Prioridade 3: Listar Recentes (Fallback para descobrir status)
-      endpoints.push({ url: `${baseUrl}${path}?limit=20&sort=-id`, label: `${path} (Recent)` });
-    });
+    let tickets = [];
+    let attendants = [];
+    let debugMsg = "";
 
-    // Adicionar Atendentes
-    endpoints.push({ url: `${baseUrl}/api/v1/atendente`, label: 'Atendentes' });
-    endpoints.push({ url: `${baseUrl}/api/v1/usuarios?cargo=atendente`, label: 'Usuários (Atendentes)' });
+    // Processar Tickets
+    if (ticketsRes && ticketsRes.data && Array.isArray(ticketsRes.data)) {
+      tickets = ticketsRes.data;
+      console.log(`[Proxy] Tickets encontrados: ${tickets.length}`);
+    } else if (Array.isArray(ticketsRes)) {
+      tickets = ticketsRes; // Algumas versões retornam array direto
+    } else {
+      debugMsg += `Tickets Error: ${JSON.stringify(ticketsRes)} `;
+      console.warn('[Proxy] Resposta inesperada tickets:', ticketsRes);
+    }
 
-    // 3. Executar chamadas em paralelo
-    const requests = endpoints.map(ep => 
-      fetch(ep.url, { headers })
-        .then(async r => {
-           // Se não for OK (ex: 404 porque endpoint não existe), retorna erro
-           if (!r.ok) return { label: ep.label, error: `${r.status} ${r.statusText}`, items: [] };
-           
-           try {
-             const text = await r.text();
-             // Verificar se é HTML (comum quando URL base está errada e aponta para frontend)
-             if (text.trim().startsWith('<')) {
-                return { label: ep.label, error: 'Response is HTML (Wrong URL?)', items: [] };
-             }
+    // Processar Atendentes
+    if (attendantsRes && attendantsRes.data && Array.isArray(attendantsRes.data)) {
+      attendants = attendantsRes.data;
+    } else if (Array.isArray(attendantsRes)) {
+      attendants = attendantsRes;
+    }
 
-             const json = JSON.parse(text);
-             // Tenta encontrar o array de dados em várias propriedades comuns
-             const items = Array.isArray(json) ? json : (json.data || json.items || json.payload || []);
-             return { label: ep.label, ok: true, items };
-           } catch(e) {
-             return { label: ep.label, error: `JSON Parse: ${e.message}`, items: [] };
-           }
-        })
-        .catch(e => ({ label: ep.label, error: `NetError: ${e.message}`, items: [] }))
-    );
-
-    const results = await Promise.all(requests);
-
-    let allTickets = [];
-    let attendantsData = [];
-
-    // 4. Processar resultados
-    results.forEach(res => {
-      if (res.label.includes('Atendentes') || res.label.includes('Usuários')) {
-        // Se encontrou atendentes, usa. Se já tem, soma (dedup depois) ou substitui se for maior
-        if (res.items.length > attendantsData.length) {
-          attendantsData = res.items;
-        }
-      } else {
-        if (res.items.length > 0) {
-           console.log(`[Proxy] ${res.label}: ${res.items.length} itens.`);
-           allTickets = [...allTickets, ...res.items];
-        }
-      }
-    });
-
-    // 5. Deduplicação por ID
-    const uniqueTicketsMap = new Map();
-    allTickets.forEach(t => {
-      const id = t._id || t.id;
-      if (id) uniqueTicketsMap.set(String(id), t);
-    });
-
-    const uniqueTickets = Array.from(uniqueTicketsMap.values());
-
-    console.log(`[Proxy] Total consolidado: ${uniqueTickets.length}`);
-
-    // 6. Retornar
+    // Retornar para o frontend
     res.json({
       success: true,
-      tickets: uniqueTickets,
-      attendants: attendantsData,
+      tickets: tickets,
+      attendants: attendants,
       debug_info: {
-        total_fetched: uniqueTickets.length,
-        // Mostra ERRO se houver, para ajudar o usuário a debugar URL
-        sources: results.map(r => `${r.label}: ${r.error ? `ERR[${r.error}]` : r.items.length}`).join(' | ')
+        msg: debugMsg,
+        tickets_raw_count: tickets.length
       }
     });
 
   } catch (error) {
-    console.error('[Proxy] Erro Crítico 500:', error);
-    res.status(500).json({ 
-      error: 'Erro interno no servidor proxy.', 
-      details: error.message
-    });
+    console.error('[Proxy] Erro:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
