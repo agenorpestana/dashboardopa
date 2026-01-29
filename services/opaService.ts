@@ -76,7 +76,7 @@ function mapApiStatus(statusRaw?: any): TicketStatus {
 
   // Em Espera ('E') / Aberto ('A')
   // Atualizado para incluir 'E' (Em Espera) conforme solicitado
-  if (s === 'E' || s === 'EM ESPERA' || s === 'EE') return 'waiting';
+  if (s === 'E' || s === 'EM ESPERA' || s === 'EA') return 'waiting';
   
   // Finalizado
   if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
