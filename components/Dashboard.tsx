@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Ticket, Attendant } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
-import { Clock, Users, Headset, Timer } from 'lucide-react';
+import { Clock, Users, Headset, Timer, Bot } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
@@ -21,6 +21,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
   
   const stats = useMemo(() => {
     const waiting = tickets.filter(t => t.status === 'waiting');
+    const bot = tickets.filter(t => t.status === 'bot');
     const inService = tickets.filter(t => t.status === 'in_service');
     
     const totalWaitTime = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
@@ -28,11 +29,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
     return {
       waitingCount: waiting.length,
+      botCount: bot.length,
       inServiceCount: inService.length,
       attendantCount: attendants.length,
       onlineAttendants: attendants.filter(a => a.status === 'online').length,
       avgWaitTimeSeconds: Math.round(avgWait),
       waitingList: waiting.sort((a, b) => b.waitTimeSeconds - a.waitTimeSeconds), // Longest wait first
+      botList: bot.sort((a, b) => b.waitTimeSeconds - a.waitTimeSeconds),
       inServiceList: inService.sort((a, b) => (b.durationSeconds || 0) - (a.durationSeconds || 0)),
     };
   }, [tickets, attendants]);
@@ -40,6 +43,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
   // Data for the chart
   const chartData = [
     { name: 'Em Espera', value: stats.waitingCount, color: '#f59e0b' },
+    { name: 'Com Bot', value: stats.botCount, color: '#8b5cf6' },
     { name: 'Atendimento', value: stats.inServiceCount, color: '#0ea5e9' },
     { name: 'Atendentes', value: stats.attendantCount, color: '#10b981' },
   ];
@@ -64,14 +68,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Stats Grid - Now 4 Columns */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Em Espera"
           value={stats.waitingCount}
           icon={<Clock className="text-amber-500" />}
           colorClass="text-amber-500"
-          trend="Clientes aguardando"
+          trend="Aguardando Humano"
+        />
+        <StatCard
+          title="Com o Bot"
+          value={stats.botCount}
+          icon={<Bot className="text-violet-500" />}
+          colorClass="text-violet-500"
+          trend="Retenção Automática"
         />
         <StatCard
           title="Em Atendimento"
@@ -89,8 +100,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         />
       </div>
 
-      {/* Content Columns */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[800px] xl:h-[600px]">
+      {/* Content Columns - 3 Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto min-h-[600px]">
         {/* Waiting List */}
         <div className="h-full">
            <TicketList 
@@ -100,7 +111,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
            />
         </div>
 
-        {/* In Service List */}
+        {/* Bot List */}
+        <div className="h-full">
+           <TicketList 
+             title="Com o Bot" 
+             tickets={stats.botList} 
+             type="bot" 
+           />
+        </div>
+
+        {/* In Service List + Mini Chart */}
         <div className="h-full flex flex-col gap-6">
            <div className="flex-1">
              <TicketList 
@@ -110,18 +130,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
              />
            </div>
            
-           {/* Mini Chart Section for visual flair */}
+           {/* Mini Chart Section */}
            <div className="h-48 bg-slate-800 border border-slate-700 rounded-xl p-4 hidden xl:block">
-              <p className="text-xs uppercase text-slate-500 font-bold mb-2 tracking-wider">Distribuição de Volume</p>
+              <p className="text-xs uppercase text-slate-500 font-bold mb-2 tracking-wider">Volume por Status</p>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 20 }}>
                   <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" width={100} tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis dataKey="name" type="category" width={90} tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                     cursor={{fill: '#334155', opacity: 0.2}}
                   />
-                  <Bar dataKey="value" barSize={20} radius={[0, 4, 4, 0]}>
+                  <Bar dataKey="value" barSize={16} radius={[0, 4, 4, 0]}>
                     {chartData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}

@@ -1,4 +1,4 @@
-export type TicketStatus = 'waiting' | 'in_service' | 'finished';
+export type TicketStatus = 'waiting' | 'in_service' | 'finished' | 'bot';
 
 export interface Ticket {
   id: string;
@@ -21,6 +21,7 @@ export interface Attendant {
 
 export interface DashboardStats {
   waitingCount: number;
+  botCount: number;
   inServiceCount: number;
   attendantCount: number;
   avgWaitTimeSeconds: number;

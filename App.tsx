@@ -4,9 +4,14 @@ import { Dashboard } from './components/Dashboard';
 import { Settings } from './components/Settings';
 import { opaService } from './services/opaService';
 import { Ticket, Attendant, AppConfig } from './types';
+import { ChevronRight } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'dashboard' | 'settings'>('dashboard');
+  
+  // Estado para controlar a visibilidade da sidebar. Padrão false (escondido).
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
   const [config, setConfig] = useState<AppConfig>({ apiUrl: '', apiToken: '' });
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [attendants, setAttendants] = useState<Attendant[]>([]);
@@ -75,13 +80,38 @@ const App: React.FC = () => {
       {/* Mobile Overlay Background */}
       <div className="fixed inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none z-0"></div>
 
-      <Sidebar currentView={currentView} onChangeView={setCurrentView} />
+      <Sidebar 
+        currentView={currentView} 
+        onChangeView={setCurrentView}
+        isOpen={isSidebarOpen}
+        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+      />
 
-      <main className="md:pl-64 transition-all duration-300 relative z-10">
-        <header className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 px-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-white capitalize">
-            {currentView === 'dashboard' ? 'Monitoramento' : 'Painel Administrativo'}
-          </h1>
+      {/* Conteúdo Principal com transição de padding */}
+      <main 
+        className={`transition-all duration-300 relative z-10 ${
+          isSidebarOpen ? 'pl-64' : 'pl-0'
+        }`}
+      >
+        <header className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 px-6 flex items-center justify-between transition-all">
+          <div className="flex items-center gap-4">
+            
+            {/* Botão Setinha para Direita (Aparece apenas se a sidebar estiver fechada) */}
+            {!isSidebarOpen && (
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="p-2 bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white rounded-lg transition-all shadow-md group border border-slate-700 hover:border-sky-500"
+                title="Abrir Menu"
+              >
+                <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            )}
+
+            <h1 className="text-xl font-bold text-white capitalize">
+              {currentView === 'dashboard' ? 'Monitoramento' : 'Painel Administrativo'}
+            </h1>
+          </div>
+
           <div className="flex items-center gap-3">
              {loading && <span className="flex h-2 w-2 rounded-full bg-sky-500 animate-pulse"></span>}
              <span className="text-xs text-slate-500 font-mono hidden sm:block">

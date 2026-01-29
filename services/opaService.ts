@@ -1,20 +1,27 @@
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
 // Mock Data Generators (Fallback)
-const NAMES = ['Maria Silva', 'João Souza', 'Ana Pereira', 'Carlos Oliveira'];
-const CONTACTS = ['maria@exemplo.com', '11999998888', 'ana.p@company.com', 'carlos@tech.br'];
+const NAMES = ['Maria Silva', 'João Souza', 'Ana Pereira', 'Carlos Oliveira', 'Fernanda Lima', 'Roberto Santos'];
+const CONTACTS = ['maria@exemplo.com', '11999998888', 'ana.p@company.com', 'carlos@tech.br', '5511988887777', 'roberto@email.com'];
 const ATTENDANTS = ['Pedro Suporte', 'Julia Atendimento', 'Marcos Vendas'];
 
 function generateMockTickets(): Ticket[] {
-  return Array.from({ length: 5 }).map((_, i) => ({
-      id: `MOCK-${i}`,
-      protocol: `TEST-${i}`,
-      clientName: NAMES[i % NAMES.length],
-      contact: CONTACTS[i % CONTACTS.length],
-      waitTimeSeconds: Math.floor(Math.random() * 600),
-      status: i % 2 === 0 ? 'waiting' : 'in_service',
-      department: 'Teste'
-  }));
+  return Array.from({ length: 8 }).map((_, i) => {
+      let status: TicketStatus = 'waiting';
+      const rand = Math.random();
+      if (rand > 0.6) status = 'in_service';
+      else if (rand > 0.3) status = 'bot';
+
+      return {
+          id: `MOCK-${i}`,
+          protocol: `TEST-${i}`,
+          clientName: NAMES[i % NAMES.length],
+          contact: CONTACTS[i % CONTACTS.length],
+          waitTimeSeconds: Math.floor(Math.random() * 600),
+          status: status,
+          department: 'Teste'
+      };
+  });
 }
 
 function generateMockAttendants(): Attendant[] {
@@ -22,7 +29,7 @@ function generateMockAttendants(): Attendant[] {
     id: `ATT-${idx}`,
     name,
     status: 'online',
-    activeChats: 2
+    activeChats: Math.floor(Math.random() * 3)
   }));
 }
 
@@ -56,21 +63,24 @@ function formatPhoneNumber(phone: string): string {
   return phone;
 }
 
-// Mapeia Status
+// Mapeia Status conforme solicitação do usuário
 function mapApiStatus(statusRaw?: any): TicketStatus {
   if (!statusRaw) return 'waiting'; 
   const s = String(statusRaw).toUpperCase().trim();
   
-  // Em Atendimento
+  // Em Atendimento ('EA')
   if (s === 'EA' || s === 'EM ATENDIMENTO' || s === '2') return 'in_service';
+  
+  // Com o Bot ('AG')
+  if (s === 'AG' || s === 'AGUARDANDO') return 'bot';
+
+  // Em Espera / Aguardando Atendimento ('A')
+  if (s === 'A' || s === 'ABERTO' || s === '1' || s === 'T') return 'waiting';
   
   // Finalizado
   if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
   
-  // Aguardando / Triagem / Pendente
-  if (s === 'AG' || s === 'AGUARDANDO' || s === 'T' || s === '1') return 'waiting';
-  
-  return 'waiting';
+  return 'waiting'; // Default fallback
 }
 
 export const opaService = {

@@ -1,11 +1,11 @@
 import React from 'react';
 import { Ticket } from '../types';
-import { Clock, User, Mail, Hash, Phone } from 'lucide-react';
+import { Clock, User, Mail, Hash, Phone, Bot } from 'lucide-react';
 
 interface TicketListProps {
   title: string;
   tickets: Ticket[];
-  type: 'waiting' | 'in_service';
+  type: 'waiting' | 'in_service' | 'bot';
 }
 
 const formatTime = (seconds: number) => {
@@ -16,15 +16,37 @@ const formatTime = (seconds: number) => {
 };
 
 export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) => {
-  const isWaiting = type === 'waiting';
-  const accentColor = isWaiting ? 'border-amber-500' : 'border-sky-500';
-  const badgeColor = isWaiting ? 'bg-amber-500/10 text-amber-500' : 'bg-sky-500/10 text-sky-500';
+  let accentColor = 'border-slate-500';
+  let badgeColor = 'bg-slate-500/10 text-slate-500';
+  let Icon = User;
+  let timerColor = 'text-slate-300';
+  let avatarColor = 'bg-slate-900/50 text-slate-400';
+
+  if (type === 'waiting') {
+    accentColor = 'border-amber-500';
+    badgeColor = 'bg-amber-500/10 text-amber-500';
+    Icon = Clock;
+    timerColor = 'text-amber-400';
+    avatarColor = 'bg-amber-900/50 text-amber-400';
+  } else if (type === 'bot') {
+    accentColor = 'border-violet-500';
+    badgeColor = 'bg-violet-500/10 text-violet-500';
+    Icon = Bot;
+    timerColor = 'text-violet-400';
+    avatarColor = 'bg-violet-900/50 text-violet-400';
+  } else if (type === 'in_service') {
+    accentColor = 'border-sky-500';
+    badgeColor = 'bg-sky-500/10 text-sky-500';
+    Icon = User;
+    timerColor = 'text-slate-300';
+    avatarColor = 'bg-sky-900/50 text-sky-400';
+  }
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col h-full shadow-lg">
       <div className={`p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center border-l-4 ${accentColor}`}>
         <h3 className="font-semibold text-lg text-white uppercase tracking-wide flex items-center gap-2">
-          {isWaiting ? <Clock className="w-5 h-5 text-amber-500" /> : <User className="w-5 h-5 text-sky-500" />}
+          <Icon className={`w-5 h-5 ${badgeColor.split(' ')[1]}`} />
           {title}
         </h3>
         <span className={`px-2 py-1 rounded text-xs font-bold ${badgeColor}`}>
@@ -38,7 +60,7 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
             <tr className="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider">
               <th className="p-4 font-medium">Cliente</th>
               <th className="p-4 font-medium">Contato</th>
-              <th className="p-4 font-medium text-right">{isWaiting ? 'Espera' : 'Duração'}</th>
+              <th className="p-4 font-medium text-right">{type === 'in_service' ? 'Duração' : 'Espera'}</th>
               <th className="p-4 font-medium text-right">Protocolo</th>
             </tr>
           </thead>
@@ -47,12 +69,12 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
               <tr key={ticket.id} className="hover:bg-slate-700/30 transition-colors group">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isWaiting ? 'bg-amber-900/50 text-amber-400' : 'bg-sky-900/50 text-sky-400'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor}`}>
                       {ticket.clientName.substring(0, 2).toUpperCase()}
                     </div>
                     <div>
                       <p className="font-medium text-slate-200">{ticket.clientName}</p>
-                      {ticket.attendantName && (
+                      {ticket.attendantName && type === 'in_service' && (
                         <p className="text-xs text-slate-500">Atendente: {ticket.attendantName}</p>
                       )}
                     </div>
@@ -65,8 +87,8 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
                    </div>
                 </td>
                 <td className="p-4 text-right">
-                  <span className={`font-mono text-sm font-medium ${isWaiting ? 'text-amber-400' : 'text-slate-300'}`}>
-                    {formatTime(isWaiting ? ticket.waitTimeSeconds : (ticket.durationSeconds || 0))}
+                  <span className={`font-mono text-sm font-medium ${timerColor}`}>
+                    {formatTime(type === 'in_service' ? (ticket.durationSeconds || 0) : ticket.waitTimeSeconds)}
                   </span>
                 </td>
                 <td className="p-4 text-right">
