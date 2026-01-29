@@ -65,23 +65,28 @@ function formatPhoneNumber(phone: string): string {
 
 // Mapeia Status conforme solicitação do usuário
 function mapApiStatus(statusRaw?: any): TicketStatus {
-  if (!statusRaw) return 'waiting'; 
+  if (!statusRaw) return 'finished'; // Ignora se não tiver status
   const s = String(statusRaw).toUpperCase().trim();
   
+  // Debug para identificar status desconhecidos no console
+  // console.log(`[StatusMap] Processing: ${s}`);
+
   // Em Atendimento ('EA')
-  if (s === 'EA' || s === 'EM ATENDIMENTO' || s === '2') return 'in_service';
+  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) return 'in_service';
   
   // Com o Bot ('AG')
-  if (s === 'AG' || s === 'AGUARDANDO') return 'bot';
+  if (['AG', 'AGUARDANDO', 'BOT'].includes(s)) return 'bot';
 
-  // Em Espera ('E') / Aberto ('A')
-  // Atualizado para incluir 'E' (Em Espera) conforme solicitado
-  if (s === 'E' || s === 'EM ESPERA' || s === 'EA') return 'waiting';
+  // Em Espera ('E', 'EE')
+  // 'A' removido propositalmente para filtrar apenas status de fila reais
+  if (['E', 'EE', 'EM ESPERA', '1', 'T'].includes(s)) return 'waiting';
   
   // Finalizado
-  if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
+  if (['F', 'FINALIZADO', '3', '4'].includes(s)) return 'finished';
   
-  return 'waiting'; // Default fallback
+  // Fallback para 'finished' (oculto) em vez de 'waiting'
+  // Isso impede que status desconhecidos ou 'A' (se não desejado) apareçam na lista de espera.
+  return 'finished'; 
 }
 
 export const opaService = {
@@ -98,7 +103,12 @@ export const opaService = {
         const rawContacts = data.contacts || [];
 
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
-        if(rawTickets.length > 0) console.log('[OpaService] Exemplo:', rawTickets[0]);
+        
+        // Debug para ajudar o usuário a ver quais status estão vindo
+        if(rawTickets.length > 0) {
+             const uniqueStatuses = [...new Set(rawTickets.map((t: any) => t.status || t.situacao))];
+             console.log('[OpaService] Status Encontrados na API:', uniqueStatuses);
+        }
 
         // 1. Criar mapa de Atendentes (ID -> Nome) e Lista Inicial
         const attendantMap = new Map<string, string>();
@@ -129,13 +139,11 @@ export const opaService = {
         });
 
         // 3. Criar mapa de Contatos (Telefone -> Nome)
-        // Isso resolve quando o ticket vem apenas com número, buscamos na agenda.
         const phoneMap = new Map<string, string>();
         rawContacts.forEach((c: any) => {
              if (c.nome && Array.isArray(c.fones)) {
                  c.fones.forEach((f: any) => {
                      if (f.numero) {
-                         // Normaliza removendo tudo que não for número para facilitar o match
                          const cleanPhone = String(f.numero).replace(/\D/g, '');
                          phoneMap.set(cleanPhone, c.nome);
                      }
@@ -149,30 +157,24 @@ export const opaService = {
            const status = mapApiStatus(rawStatus);
            const dateField = t.date || t.data_criacao; 
 
-           // Extrai contato do canal se disponível (ex: 55119999@c.us)
            let channelContact = '';
            if (t.canal_cliente) {
               channelContact = t.canal_cliente.split('@')[0];
            }
 
-           // --- Lógica de Prioridade de Nome ---
            let clientName = 'Cliente';
            let contact = 'N/A';
            
-           // 1. Prioridade: Campo "id_cliente" populado (objeto)
            if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || t.id_cliente.fantasia || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
            } 
-           // 2. Prioridade: Busca no Mapa de Clientes (se id_cliente for string)
            else if (t.id_cliente && typeof t.id_cliente === 'string' && clientMap.has(t.id_cliente)) {
               clientName = clientMap.get(t.id_cliente) || clientName;
            }
-           // 3. Prioridade: Campo "cliente" explícito
            else if (t.cliente && typeof t.cliente === 'object' && (t.cliente.nome || t.cliente.fantasia)) {
               clientName = t.cliente.nome || t.cliente.fantasia;
            }
-           // 4. Prioridade: Nome direto ou origem
            else if (t.nome_cliente) {
               clientName = t.nome_cliente;
            }
@@ -185,22 +187,17 @@ export const opaService = {
               clientName = t.client_name;
            }
 
-           // Definição do Contato (Telefone/Email)
            if (contact === 'N/A' && channelContact) {
               contact = channelContact;
            }
            
-           // Validação Final e Tentativa de Recuperação pelo Mapa de Contatos
-           // Se o nome for 'Cliente', vazio, ou parecer um número de telefone
            const isNameNumeric = /^\d+$/.test(clientName.replace(/\D/g, ''));
            
            if ((clientName === 'Cliente' || !clientName || isNameNumeric) && contact !== 'N/A') {
-              // Tenta achar pelo telefone na agenda de contatos
               const ticketPhone = contact.replace(/\D/g, '');
               if (phoneMap.has(ticketPhone)) {
                  clientName = phoneMap.get(ticketPhone)!;
               } else {
-                 // Se não achar na agenda, formata o número para exibir bonitinho
                  if (contact.startsWith('55') && contact.length >= 12) {
                     clientName = formatPhoneNumber(contact);
                  } else {
@@ -209,7 +206,6 @@ export const opaService = {
               }
            }
 
-           // Atendente
            let attendantName = undefined;
            if (t.id_atendente && typeof t.id_atendente === 'object') {
               attendantName = t.id_atendente.nome;
@@ -235,7 +231,7 @@ export const opaService = {
            };
         });
 
-        // 5. Filtrar finalizados
+        // 5. Filtrar finalizados e desconhecidos (já mapeados como finished)
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
         // 6. Calcular Chats Ativos por Atendente
