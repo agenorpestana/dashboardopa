@@ -31,15 +31,45 @@ function calculateSeconds(dateStr?: string): number {
   if (!dateStr) return 0;
   const start = new Date(dateStr).getTime();
   const now = new Date().getTime();
+  // Math.max(0) previne números negativos caso o relógio do servidor esteja levemente adiantado
   return Math.max(0, Math.floor((now - start) / 1000));
+}
+
+// Formata telefone BR (55 + DDD + Numero)
+function formatPhoneNumber(phone: string): string {
+  if (!phone) return phone;
+  // Remove caracteres não numéricos
+  const nums = phone.replace(/\D/g, '');
+  
+  // Verifica se é celular BR (55 + 2 digitos DDD + 9 digitos numero)
+  const mobileMatch = nums.match(/^55(\d{2})(\d{5})(\d{4})$/);
+  if (mobileMatch) {
+    return `(${mobileMatch[1]}) ${mobileMatch[2]}-${mobileMatch[3]}`;
+  }
+
+  // Verifica se é fixo BR (55 + 2 digitos DDD + 8 digitos numero)
+  const landlineMatch = nums.match(/^55(\d{2})(\d{4})(\d{4})$/);
+  if (landlineMatch) {
+    return `(${landlineMatch[1]}) ${landlineMatch[2]}-${landlineMatch[3]}`;
+  }
+
+  return phone;
 }
 
 // Mapeia Status
 function mapApiStatus(statusRaw?: any): TicketStatus {
   if (!statusRaw) return 'waiting'; 
   const s = String(statusRaw).toUpperCase().trim();
+  
+  // Em Atendimento
   if (s === 'EA' || s === 'EM ATENDIMENTO' || s === '2') return 'in_service';
+  
+  // Finalizado
   if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
+  
+  // Aguardando / Triagem / Pendente
+  if (s === 'AG' || s === 'AGUARDANDO' || s === 'T' || s === '1') return 'waiting';
+  
   return 'waiting';
 }
 
@@ -89,6 +119,7 @@ export const opaService = {
               channelContact = t.canal_cliente.split('@')[0];
            }
 
+           // Tenta pegar dados do objeto id_cliente se existir
            if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
@@ -96,14 +127,19 @@ export const opaService = {
               clientName = t.client_name;
            }
 
-           // Se contato ainda é N/A
+           // Se contato ainda é N/A, usa o do canal
            if (contact === 'N/A' && channelContact) {
               contact = channelContact;
            }
            
-           // Se o nome for genérico e tivermos o contato, usa o contato como nome
+           // Se o nome for genérico e tivermos o contato, usa o contato formatado como nome
            if (clientName === 'Cliente' && contact !== 'N/A') {
-              clientName = contact;
+              // Se parece ser um telefone, formata
+              if (contact.startsWith('55') && contact.length >= 12) {
+                 clientName = formatPhoneNumber(contact);
+              } else {
+                 clientName = contact;
+              }
            }
 
            // Atendente: Tenta pegar objeto, senão busca no mapa, senão usa 'Atendente'
@@ -122,7 +158,7 @@ export const opaService = {
               id: String(t._id || t.id),
               protocol: t.protocolo || 'N/A',
               clientName,
-              contact,
+              contact: formatPhoneNumber(contact),
               waitTimeSeconds: calculateSeconds(dateField),
               durationSeconds: (status === 'in_service') ? calculateSeconds(dateField) : undefined,
               status,
@@ -131,10 +167,10 @@ export const opaService = {
            };
         });
 
-        // 3. Filtrar finalizados (Frontend filter as safety net)
+        // 3. Filtrar finalizados (Garantia extra no front)
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // 4. Se não veio lista de atendentes da API, improvisar
+        // 4. Se não veio lista de atendentes da API, improvisar com base nos tickets
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {
