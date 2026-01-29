@@ -38,54 +38,65 @@ function calculateSeconds(dateStr?: string): number {
   if (!dateStr) return 0;
   const start = new Date(dateStr).getTime();
   const now = new Date().getTime();
-  // Math.max(0) previne números negativos caso o relógio do servidor esteja levemente adiantado
   return Math.max(0, Math.floor((now - start) / 1000));
 }
 
 // Formata telefone BR (55 + DDD + Numero)
 function formatPhoneNumber(phone: string): string {
   if (!phone) return phone;
-  // Remove caracteres não numéricos
   const nums = phone.replace(/\D/g, '');
   
-  // Verifica se é celular BR (55 + 2 digitos DDD + 9 digitos numero)
   const mobileMatch = nums.match(/^55(\d{2})(\d{5})(\d{4})$/);
-  if (mobileMatch) {
-    return `(${mobileMatch[1]}) ${mobileMatch[2]}-${mobileMatch[3]}`;
-  }
+  if (mobileMatch) return `(${mobileMatch[1]}) ${mobileMatch[2]}-${mobileMatch[3]}`;
 
-  // Verifica se é fixo BR (55 + 2 digitos DDD + 8 digitos numero)
   const landlineMatch = nums.match(/^55(\d{2})(\d{4})(\d{4})$/);
-  if (landlineMatch) {
-    return `(${landlineMatch[1]}) ${landlineMatch[2]}-${landlineMatch[3]}`;
-  }
+  if (landlineMatch) return `(${landlineMatch[1]}) ${landlineMatch[2]}-${landlineMatch[3]}`;
 
   return phone;
 }
 
-// Mapeia Status conforme solicitação do usuário
-function mapApiStatus(statusRaw?: any): TicketStatus {
-  if (!statusRaw) return 'finished'; // Ignora se não tiver status
+// Nova Função de Lógica de Status (Status + Setor)
+function determineTicketStatus(statusRaw: any, departmentRaw: any): TicketStatus {
+  if (!statusRaw) return 'finished'; 
+  
   const s = String(statusRaw).toUpperCase().trim();
-  
-  // Debug para identificar status desconhecidos no console
-  // console.log(`[StatusMap] Processing: ${s}`);
 
-  // Em Atendimento ('EA')
-  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) return 'in_service';
+  // 1. Em Atendimento ('EA')
+  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) {
+    return 'in_service';
+  }
   
-  // Com o Bot ('AG')
-  if (['AG', 'PS', 'AGUARDANDO', 'BOT'].includes(s)) return 'bot';
+  // 2. Lógica para 'AG' (Aguardando) e 'PS' (Pesquisa)
+  if (['AG', 'AGUARDANDO', 'BOT', 'PS'].includes(s)) {
+     // Se for Pesquisa de Satisfação (PS), consideramos BOT/Automação
+     if (s === 'PS') return 'bot';
 
-  // Em Espera ('E', 'EE')
-  // 'A' removido propositalmente para filtrar apenas status de fila reais
-  if (['E', 'A', 'EM ESPERA', '1', 'T'].includes(s)) return 'waiting';
+     // Se for AG, verificamos se tem Setor
+     // Se tiver Setor -> O cliente já escolheu a fila -> WAITING (Em Espera Humana)
+     // Se NÃO tiver Setor -> O cliente está no menu inicial -> BOT
+     const hasDepartment = departmentRaw && (
+        (typeof departmentRaw === 'object' && departmentRaw.nome) || // Objeto populado
+        (typeof departmentRaw === 'string' && departmentRaw.length > 0) // ID String
+     );
+
+     if (hasDepartment) {
+        return 'waiting';
+     } else {
+        return 'bot';
+     }
+  }
+
+  // 3. Status explícitos de espera (manter compatibilidade caso venha 'E' ou 'EE')
+  if (['E', 'EE', 'EM ESPERA', '1', 'T'].includes(s)) {
+    return 'waiting';
+  }
   
-  // Finalizado
-  if (['F', 'FINALIZADO', '3', '4'].includes(s)) return 'finished';
+  // 4. Finalizados
+  if (['F', 'FINALIZADO', '3', '4'].includes(s)) {
+    return 'finished';
+  }
   
-  // Fallback para 'finished' (oculto) em vez de 'waiting'
-  // Isso impede que status desconhecidos ou 'A' (se não desejado) apareçam na lista de espera.
+  // Qualquer outra coisa oculta
   return 'finished'; 
 }
 
@@ -104,13 +115,12 @@ export const opaService = {
 
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
         
-        // Debug para ajudar o usuário a ver quais status estão vindo
         if(rawTickets.length > 0) {
              const uniqueStatuses = [...new Set(rawTickets.map((t: any) => t.status || t.situacao))];
              console.log('[OpaService] Status Encontrados na API:', uniqueStatuses);
         }
 
-        // 1. Criar mapa de Atendentes (ID -> Nome) e Lista Inicial
+        // 1. Criar mapa de Atendentes
         const attendantMap = new Map<string, string>();
         
         let attendants: Attendant[] = rawAttendants.map((a: any) => {
@@ -118,27 +128,25 @@ export const opaService = {
           const name = a.nome || a.name || 'Agente';
           attendantMap.set(id, name);
           
-          // Mapeia status 'A' (Ativo da tabela de usuários) para 'online'
           const isOnline = a.status === 'A' || a.status === 'ativo' || a.is_online;
 
           return {
             id,
             name,
             status: isOnline ? 'online' : 'busy',
-            activeChats: 0 // Será calculado abaixo
+            activeChats: 0
           };
         });
 
-        // 2. Criar mapa de Clientes (ID -> Nome/Fantasia)
+        // 2. Criar mapa de Clientes
         const clientMap = new Map<string, string>();
         rawClients.forEach((c: any) => {
              const id = String(c._id || c.id);
-             // Prioriza Nome, depois Fantasia
              const name = c.nome || c.fantasia || 'Cliente';
              clientMap.set(id, name);
         });
 
-        // 3. Criar mapa de Contatos (Telefone -> Nome)
+        // 3. Criar mapa de Contatos
         const phoneMap = new Map<string, string>();
         rawContacts.forEach((c: any) => {
              if (c.nome && Array.isArray(c.fones)) {
@@ -154,7 +162,11 @@ export const opaService = {
         // 4. Mapear Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            const rawStatus = t.status || t.situacao;
-           const status = mapApiStatus(rawStatus);
+           const rawDept = t.setor; // Captura o setor bruto
+
+           // Determina status baseado no Status + Setor
+           const status = determineTicketStatus(rawStatus, rawDept);
+           
            const dateField = t.date || t.data_criacao; 
 
            let channelContact = '';
@@ -165,6 +177,7 @@ export const opaService = {
            let clientName = 'Cliente';
            let contact = 'N/A';
            
+           // Lógica de nome do cliente...
            if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || t.id_cliente.fantasia || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
@@ -231,10 +244,10 @@ export const opaService = {
            };
         });
 
-        // 5. Filtrar finalizados e desconhecidos (já mapeados como finished)
+        // 5. Filtrar finalizados
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // 6. Calcular Chats Ativos por Atendente
+        // 6. Calcular Chats Ativos
         activeTickets.forEach(t => {
            if (t.status === 'in_service' && t.attendantName) {
               const att = attendants.find(a => a.name === t.attendantName);
@@ -244,7 +257,7 @@ export const opaService = {
            }
         });
 
-        // 7. Fallback se não veio lista de atendentes
+        // 7. Fallback se não veio atendentes
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {
