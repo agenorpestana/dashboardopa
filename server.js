@@ -173,55 +173,84 @@ app.get('/api/dashboard-data', async (req, res) => {
       'Content-Type': 'application/json'
     };
 
-    console.log(`[Proxy] Iniciando busca filtrada em: ${baseUrl}`);
+    console.log(`[Proxy] Iniciando busca multi-estratégia em: ${baseUrl}`);
 
-    // 2. Definir URLs específicas para buscar APENAS tickets abertos
-    // Isso evita trazer o histórico de 50.000 chamados finalizados
+    // 2. Definir URLs Variadas
+    // Tentamos todas as variações possíveis de parâmetros para garantir que pegamos os dados
     const endpoints = [
-      `${baseUrl}/api/v1/atendimento?status=EA`, // Em Atendimento
-      `${baseUrl}/api/v1/atendimento?status=A`,  // Aberto (Fila)
-      `${baseUrl}/api/v1/atendimento?status=P`,  // Pendente
-      `${baseUrl}/api/v1/atendente`               // Agentes
+      // Padrão: Status Curtos
+      { url: `${baseUrl}/api/v1/atendimento?status=EA`, label: 'Status EA' },
+      { url: `${baseUrl}/api/v1/atendimento?status=A`,  label: 'Status A' },
+      { url: `${baseUrl}/api/v1/atendimento?status=P`,  label: 'Status P' },
+      
+      // Padrão: Situacao (algumas versões usam 'situacao' em vez de 'status')
+      { url: `${baseUrl}/api/v1/atendimento?situacao=EA`, label: 'Situacao EA' },
+      { url: `${baseUrl}/api/v1/atendimento?situacao=A`,  label: 'Situacao A' },
+      
+      // Padrão: Status Extenso
+      { url: `${baseUrl}/api/v1/atendimento?status=EM%20ATENDIMENTO`, label: 'Status EM ATENDIMENTO' },
+      { url: `${baseUrl}/api/v1/atendimento?status=AGUARDANDO`, label: 'Status AGUARDANDO' },
+      
+      // Atendentes
+      { url: `${baseUrl}/api/v1/atendente`, label: 'Atendentes' }
     ];
 
     // 3. Executar chamadas em paralelo
-    const responses = await Promise.allSettled(endpoints.map(url => fetch(url, { headers })));
+    const requests = endpoints.map(ep => 
+      fetch(ep.url, { headers })
+        .then(async r => {
+           if (!r.ok) return { label: ep.label, error: r.status, items: [] };
+           try {
+             const json = await r.json();
+             const items = Array.isArray(json) ? json : (json.data || json.items || []);
+             return { label: ep.label, ok: true, items };
+           } catch(e) {
+             return { label: ep.label, error: 'JSON Parse', items: [] };
+           }
+        })
+        .catch(e => ({ label: ep.label, error: e.message, items: [] }))
+    );
 
+    const results = await Promise.all(requests);
+
+    let allTickets = [];
     let attendantsData = [];
-    let ticketsEA = [];
-    let ticketsA = [];
-    let ticketsP = [];
 
-    // Helper para extrair JSON de forma segura
-    const safeJson = async (result, label) => {
-      if (result.status === 'fulfilled' && result.value.ok) {
-        try {
-          const json = await result.value.json();
-          const data = Array.isArray(json) ? json : (json.data || json.items || []);
-          console.log(`[Proxy] ${label}: ${data.length} itens recuperados.`);
-          return data;
-        } catch (e) {
-          console.error(`[Proxy] Erro parse JSON ${label}:`, e.message);
-          return [];
+    // 4. Processar resultados
+    results.forEach(res => {
+      if (res.label === 'Atendentes') {
+        attendantsData = res.items;
+        console.log(`[Proxy] Atendentes: ${attendantsData.length}`);
+      } else {
+        if (res.items.length > 0) {
+           console.log(`[Proxy] ${res.label}: ${res.items.length} tickets encontrados.`);
+           allTickets = [...allTickets, ...res.items];
+        } else {
+           // Log silencioso para não poluir demais, a menos que seja erro
+           if (res.error) console.warn(`[Proxy] ${res.label} falhou: ${res.error}`);
         }
       }
-      if (result.status === 'fulfilled' && !result.value.ok) {
-        console.warn(`[Proxy] Falha HTTP ${label}: ${result.value.status}`);
-      }
-      return [];
-    };
+    });
 
-    // Extrair dados
-    ticketsEA = await safeJson(responses[0], 'Tickets (EA)');
-    ticketsA  = await safeJson(responses[1], 'Tickets (A)');
-    ticketsP  = await safeJson(responses[2], 'Tickets (P)');
-    attendantsData = await safeJson(responses[3], 'Atendentes');
+    // 5. Fallback: Se NENHUM filtro funcionou, tentar buscar TUDO mas ordenar por ID decrescente
+    // (Última esperança para pegar recentes se os filtros de status falharem)
+    if (allTickets.length === 0) {
+       console.log('[Proxy] Nenhum ticket encontrado com filtros. Tentando fallback (sem filtro, 50 recentes)...');
+       try {
+         const fallbackUrl = `${baseUrl}/api/v1/atendimento?limit=50&sort=-id`; 
+         const fbRes = await fetch(fallbackUrl, { headers });
+         if (fbRes.ok) {
+            const fbJson = await fbRes.json();
+            const fbItems = Array.isArray(fbJson) ? fbJson : (fbJson.data || fbJson.items || []);
+            console.log(`[Proxy] Fallback retornou ${fbItems.length} itens.`);
+            allTickets = fbItems;
+         }
+       } catch (e) {
+         console.error('[Proxy] Fallback falhou:', e);
+       }
+    }
 
-    // 4. Combinar e Remover Duplicatas
-    // (Caso um ticket mude de status durante a requisição, ou a API retorne sobreposição)
-    const allTickets = [...ticketsEA, ...ticketsA, ...ticketsP];
-    
-    // Deduplicação por ID
+    // 6. Deduplicação por ID
     const uniqueTicketsMap = new Map();
     allTickets.forEach(t => {
       const id = t._id || t.id;
@@ -230,9 +259,9 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const uniqueTickets = Array.from(uniqueTicketsMap.values());
 
-    console.log(`[Proxy] Total consolidado de tickets ativos: ${uniqueTickets.length}`);
+    console.log(`[Proxy] Total FINAL consolidado de tickets: ${uniqueTickets.length}`);
 
-    // 5. Retornar
+    // 7. Retornar
     res.json({
       success: true,
       tickets: uniqueTickets,
