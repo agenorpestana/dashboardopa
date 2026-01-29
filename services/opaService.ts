@@ -56,7 +56,7 @@ function formatPhoneNumber(phone: string): string {
 }
 
 // Nova Função de Lógica de Status (Status + Setor)
-function determineTicketStatus(statusRaw: any, departmentRaw: any): TicketStatus {
+function determineTicketStatus(statusRaw: any, departmentName?: string): TicketStatus {
   if (!statusRaw) return 'finished'; 
   
   const s = String(statusRaw).toUpperCase().trim();
@@ -71,13 +71,8 @@ function determineTicketStatus(statusRaw: any, departmentRaw: any): TicketStatus
      // Se for Pesquisa de Satisfação (PS), consideramos BOT/Automação
      if (s === 'PS') return 'bot';
 
-     // Se for AG, verificamos se tem Setor
-     // Se tiver Setor -> O cliente já escolheu a fila -> WAITING (Em Espera Humana)
-     // Se NÃO tiver Setor -> O cliente está no menu inicial -> BOT
-     const hasDepartment = departmentRaw && (
-        (typeof departmentRaw === 'object' && departmentRaw.nome) || // Objeto populado
-        (typeof departmentRaw === 'string' && departmentRaw.length > 0) // ID String
-     );
+     // Se for AG, verificamos se tem Setor (Nome do setor resolvido)
+     const hasDepartment = departmentName && departmentName !== 'Geral' && departmentName !== 'Sem Setor';
 
      if (hasDepartment) {
         return 'waiting';
@@ -86,7 +81,7 @@ function determineTicketStatus(statusRaw: any, departmentRaw: any): TicketStatus
      }
   }
 
-  // 3. Status explícitos de espera (manter compatibilidade caso venha 'E' ou 'EE')
+  // 3. Status explícitos de espera
   if (['E', 'EE', 'EM ESPERA', '1', 'T'].includes(s)) {
     return 'waiting';
   }
@@ -112,6 +107,7 @@ export const opaService = {
         const rawAttendants = data.attendants || [];
         const rawClients = data.clients || [];
         const rawContacts = data.contacts || [];
+        const rawDepartments = data.departments || [];
 
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
         
@@ -159,13 +155,31 @@ export const opaService = {
              }
         });
 
-        // 4. Mapear Tickets
+        // 4. Criar mapa de Departamentos (Setores)
+        const departmentMap = new Map<string, string>();
+        rawDepartments.forEach((d: any) => {
+            const id = String(d._id || d.id);
+            const name = d.nome || 'Setor';
+            departmentMap.set(id, name);
+        });
+
+        // 5. Mapear Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            const rawStatus = t.status || t.situacao;
-           const rawDept = t.setor; // Captura o setor bruto
+           const rawDept = t.setor || t.departamento || t.id_departamento; 
 
-           // Determina status baseado no Status + Setor
-           const status = determineTicketStatus(rawStatus, rawDept);
+           // Resolve o nome do setor
+           let departmentName = undefined;
+           if (typeof rawDept === 'object' && rawDept?.nome) {
+               departmentName = rawDept.nome;
+           } else if (typeof rawDept === 'string' && departmentMap.has(rawDept)) {
+               departmentName = departmentMap.get(rawDept);
+           } else if (typeof rawDept === 'string' && rawDept.length > 0) {
+               departmentName = "Geral"; // ID existe mas não achou no map
+           }
+
+           // Determina status baseado no Status + Setor Resolvido
+           const status = determineTicketStatus(rawStatus, departmentName);
            
            const dateField = t.date || t.data_criacao; 
 
@@ -240,7 +254,7 @@ export const opaService = {
               durationSeconds: (status === 'in_service') ? calculateSeconds(dateField) : undefined,
               status,
               attendantName,
-              department: typeof t.setor === 'object' ? t.setor?.nome : 'Geral'
+              department: departmentName || 'Geral'
            };
         });
 

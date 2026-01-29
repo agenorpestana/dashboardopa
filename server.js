@@ -285,15 +285,21 @@ app.get('/api/dashboard-data', async (req, res) => {
         "options": { "limit": 500, "sort": "-_id" }
     };
     
-    // Busca de Contatos (Base de Agenda) - NOVO
+    // Busca de Contatos (Base de Agenda)
     const contactsPayload = {
         "options": { "limit": 500, "sort": "-_id" }
+    };
+
+    // Busca de Departamentos (Setores)
+    const departmentsPayload = {
+        "options": { "limit": 100, "sort": "nome" }
     };
 
     // Executa Promises
     const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, attendantsPayload);
     const clientsPromise = requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, clientsPayload);
     const contactsPromise = requestWithBody(`${baseUrl}/api/v1/contato`, 'GET', token, contactsPayload);
+    const departmentsPromise = requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, departmentsPayload);
     
     // Busca de Tickets
     let ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadOptimized);
@@ -302,6 +308,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     let attendants = [];
     let clients = [];
     let contacts = [];
+    let departments = [];
     let debugMsg = "";
 
     // Lógica de Fallback para Tickets
@@ -364,13 +371,25 @@ app.get('/api/dashboard-data', async (req, res) => {
       console.log(`[Proxy] Contatos obtidos: ${contacts.length}`);
     }
 
+    // Processar resposta de Departamentos
+    const departmentsRes = await departmentsPromise;
+    if (departmentsRes.ok && departmentsRes.data) {
+      if (Array.isArray(departmentsRes.data.data)) {
+        departments = departmentsRes.data.data;
+      } else if (Array.isArray(departmentsRes.data)) {
+        departments = departmentsRes.data;
+      }
+      console.log(`[Proxy] Departamentos obtidos: ${departments.length}`);
+    }
+
     // Retornar para o frontend
     res.json({
       success: true,
       tickets: tickets,
       attendants: attendants,
       clients: clients, 
-      contacts: contacts, // Lista de contatos da agenda
+      contacts: contacts,
+      departments: departments,
       debug_info: {
         msg: debugMsg,
         tickets_raw_count: tickets.length
