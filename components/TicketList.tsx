@@ -1,6 +1,6 @@
 import React from 'react';
 import { Ticket } from '../types';
-import { Clock, User, Mail, Hash, Phone, Bot } from 'lucide-react';
+import { Clock, User, Hash, Bot } from 'lucide-react';
 
 interface TicketListProps {
   title: string;
@@ -58,8 +58,8 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider">
-              <th className="p-4 font-medium">Cliente</th>
-              <th className="p-4 font-medium">Contato</th>
+              {/* Coluna Contato removida conforme solicitado */}
+              <th className="p-4 font-medium w-1/2">Cliente</th> 
               <th className="p-4 font-medium text-right">{type === 'in_service' ? 'Duração' : 'Espera'}</th>
               <th className="p-4 font-medium text-right">Protocolo</th>
             </tr>
@@ -69,30 +69,28 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
               <tr key={ticket.id} className="hover:bg-slate-700/30 transition-colors group">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${avatarColor}`}>
                       {ticket.clientName.substring(0, 2).toUpperCase()}
                     </div>
-                    <div>
-                      <p className="font-medium text-slate-200">{ticket.clientName}</p>
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-200 truncate pr-2">{ticket.clientName}</p>
                       {ticket.attendantName && type === 'in_service' && (
-                        <p className="text-xs text-slate-500">Atendente: {ticket.attendantName}</p>
+                        <p className="text-xs text-slate-500 truncate">Atendente: {ticket.attendantName}</p>
+                      )}
+                      {/* Mostra o departamento/setor se disponível na espera */}
+                      {type === 'waiting' && ticket.department && (
+                         <p className="text-xs text-slate-500 truncate">Setor: {ticket.department}</p>
                       )}
                     </div>
                   </div>
                 </td>
-                <td className="p-4 text-slate-400 text-sm">
-                   <div className="flex items-center gap-2">
-                      {ticket.contact.includes('@') ? <Mail className="w-3 h-3"/> : <Phone className="w-3 h-3"/>}
-                      {ticket.contact}
-                   </div>
-                </td>
-                <td className="p-4 text-right">
+                <td className="p-4 text-right whitespace-nowrap">
                   <span className={`font-mono text-sm font-medium ${timerColor}`}>
                     {formatTime(type === 'in_service' ? (ticket.durationSeconds || 0) : ticket.waitTimeSeconds)}
                   </span>
                 </td>
-                <td className="p-4 text-right">
-                   <div className="flex items-center justify-end gap-1 text-slate-500 font-mono text-sm group-hover:text-slate-300">
+                <td className="p-4 text-right whitespace-nowrap">
+                   <div className="flex items-center justify-end gap-1 text-slate-500 font-mono text-xs group-hover:text-slate-300">
                       <Hash className="w-3 h-3" />
                       {ticket.protocol}
                    </div>
@@ -101,7 +99,7 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
             ))}
             {tickets.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-500 italic">
+                <td colSpan={3} className="p-8 text-center text-slate-500 italic">
                   Nenhum atendimento neste status.
                 </td>
               </tr>

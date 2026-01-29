@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Ticket, Attendant } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
-import { Clock, Users, Headset, Timer, Bot } from 'lucide-react';
+import { Clock, Users, Headset, Timer, Bot, Activity } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
@@ -24,8 +24,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const bot = tickets.filter(t => t.status === 'bot');
     const inService = tickets.filter(t => t.status === 'in_service');
     
+    // Tempo médio de espera
     const totalWaitTime = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWaitTime / waiting.length : 0;
+
+    // Tempo médio de atendimento (dos tickets ativos)
+    const totalServiceTime = inService.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
+    const avgService = inService.length > 0 ? totalServiceTime / inService.length : 0;
 
     return {
       waitingCount: waiting.length,
@@ -34,6 +39,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       attendantCount: attendants.length,
       onlineAttendants: attendants.filter(a => a.status === 'online').length,
       avgWaitTimeSeconds: Math.round(avgWait),
+      avgServiceTimeSeconds: Math.round(avgService),
       waitingList: waiting.sort((a, b) => b.waitTimeSeconds - a.waitTimeSeconds), // Longest wait first
       botList: bot.sort((a, b) => b.waitTimeSeconds - a.waitTimeSeconds),
       inServiceList: inService.sort((a, b) => (b.durationSeconds || 0) - (a.durationSeconds || 0)),
@@ -51,24 +57,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       
-      {/* Top Header - Average Time */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 rounded-xl p-6 flex flex-col md:flex-row items-center justify-between shadow-xl">
+      {/* Top Header - Average Time Metrics */}
+      <div className="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 rounded-xl p-6 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-6">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Timer className="w-6 h-6 text-sky-400" />
-            Status de Atendimento
+            <Activity className="w-6 h-6 text-sky-400" />
+            Visão Geral da Operação
           </h2>
-          <p className="text-slate-400 text-sm mt-1">Monitoramento em tempo real da operação.</p>
+          <p className="text-slate-400 text-sm mt-1">Monitoramento em tempo real de filas e performance.</p>
         </div>
-        <div className="mt-4 md:mt-0 flex items-center gap-4 bg-slate-950/50 px-6 py-3 rounded-lg border border-slate-800">
-          <span className="text-slate-400 font-medium uppercase text-sm tracking-wide">Tempo Médio de Espera</span>
-          <span className={`text-2xl font-mono font-bold ${stats.avgWaitTimeSeconds > 600 ? 'text-red-500' : 'text-emerald-400'}`}>
-            {formatTime(stats.avgWaitTimeSeconds)}
-          </span>
+        
+        <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto">
+          {/* Card Tempo Espera */}
+          <div className="flex-1 flex items-center gap-4 bg-slate-950/50 px-6 py-3 rounded-lg border border-slate-800 shadow-inner">
+            <div className="p-2 bg-amber-500/10 rounded-full">
+              <Timer className="w-5 h-5 text-amber-500" />
+            </div>
+            <div>
+              <p className="text-slate-400 font-medium uppercase text-xs tracking-wide">T.M. Espera</p>
+              <p className={`text-2xl font-mono font-bold ${stats.avgWaitTimeSeconds > 600 ? 'text-red-500' : 'text-amber-400'}`}>
+                {formatTime(stats.avgWaitTimeSeconds)}
+              </p>
+            </div>
+          </div>
+
+          {/* Card Tempo Atendimento */}
+          <div className="flex-1 flex items-center gap-4 bg-slate-950/50 px-6 py-3 rounded-lg border border-slate-800 shadow-inner">
+             <div className="p-2 bg-sky-500/10 rounded-full">
+              <Headset className="w-5 h-5 text-sky-500" />
+            </div>
+            <div>
+              <p className="text-slate-400 font-medium uppercase text-xs tracking-wide">T.M. Atendimento</p>
+              <p className="text-2xl font-mono font-bold text-sky-400">
+                {formatTime(stats.avgServiceTimeSeconds)}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Stats Grid - Now 4 Columns */}
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Em Espera"
@@ -100,7 +128,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         />
       </div>
 
-      {/* Content Columns - 3 Column Layout */}
+      {/* Content Columns */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto min-h-[600px]">
         {/* Waiting List */}
         <div className="h-full">

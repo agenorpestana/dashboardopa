@@ -25,6 +25,7 @@ export interface DashboardStats {
   inServiceCount: number;
   attendantCount: number;
   avgWaitTimeSeconds: number;
+  avgServiceTimeSeconds: number;
 }
 
 export interface AppConfig {
