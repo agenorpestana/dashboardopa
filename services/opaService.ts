@@ -83,6 +83,7 @@ export const opaService = {
         const data = await response.json();
         const rawTickets = data.tickets || [];
         const rawAttendants = data.attendants || [];
+        const rawClients = data.clients || [];
 
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
         if(rawTickets.length > 0) console.log('[OpaService] Exemplo:', rawTickets[0]);
@@ -106,7 +107,16 @@ export const opaService = {
           };
         });
 
-        // 2. Mapear Tickets
+        // 2. Criar mapa de Clientes (ID -> Nome/Fantasia)
+        const clientMap = new Map<string, string>();
+        rawClients.forEach((c: any) => {
+             const id = String(c._id || c.id);
+             // Prioriza Nome, depois Fantasia
+             const name = c.nome || c.fantasia || 'Cliente';
+             clientMap.set(id, name);
+        });
+
+        // 3. Mapear Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            const rawStatus = t.status || t.situacao;
            const status = mapApiStatus(rawStatus);
@@ -122,13 +132,20 @@ export const opaService = {
            let clientName = 'Cliente';
            let contact = 'N/A';
            
+           // 1. Prioridade: Campo "id_cliente" populado (objeto)
            if (t.id_cliente && typeof t.id_cliente === 'object') {
-              clientName = t.id_cliente.nome || clientName;
+              clientName = t.id_cliente.nome || t.id_cliente.fantasia || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
            } 
-           else if (t.cliente && typeof t.cliente === 'object' && t.cliente.nome) {
-              clientName = t.cliente.nome;
+           // 2. Prioridade: Busca no Mapa de Clientes (se id_cliente for string)
+           else if (t.id_cliente && typeof t.id_cliente === 'string' && clientMap.has(t.id_cliente)) {
+              clientName = clientMap.get(t.id_cliente) || clientName;
            }
+           // 3. Prioridade: Campo "cliente" explícito
+           else if (t.cliente && typeof t.cliente === 'object' && (t.cliente.nome || t.cliente.fantasia)) {
+              clientName = t.cliente.nome || t.cliente.fantasia;
+           }
+           // 4. Prioridade: Nome direto ou origem
            else if (t.nome_cliente) {
               clientName = t.nome_cliente;
            }
@@ -155,11 +172,9 @@ export const opaService = {
 
            // Atendente
            let attendantName = undefined;
-           // Tenta pelo objeto populado
            if (t.id_atendente && typeof t.id_atendente === 'object') {
               attendantName = t.id_atendente.nome;
            } 
-           // Tenta pelo ID mapeado na lista de usuários que acabamos de buscar
            else if (t.id_atendente) {
               attendantName = attendantMap.get(String(t.id_atendente));
            }
@@ -181,14 +196,12 @@ export const opaService = {
            };
         });
 
-        // 3. Filtrar finalizados
+        // 4. Filtrar finalizados
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // 4. Calcular Chats Ativos por Atendente
-        // Percorre os tickets ativos e incrementa o contador do atendente correspondente
+        // 5. Calcular Chats Ativos por Atendente
         activeTickets.forEach(t => {
            if (t.status === 'in_service' && t.attendantName) {
-              // Tenta achar pelo nome (já que o ID pode variar entre ticket e user list dependendo da versão)
               const att = attendants.find(a => a.name === t.attendantName);
               if (att) {
                  att.activeChats++;
@@ -196,7 +209,7 @@ export const opaService = {
            }
         });
 
-        // 5. Fallback se não veio lista de atendentes (usuários)
+        // 6. Fallback se não veio lista de atendentes
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {
@@ -205,7 +218,6 @@ export const opaService = {
            attendants = Array.from(names).map((name, i) => ({
              id: `gen-${i}`, name, status: 'online', activeChats: 0
            }));
-           // Recalcula contagem para esse fallback
            activeTickets.forEach(t => {
               if (t.status === 'in_service' && t.attendantName) {
                  const att = attendants.find(a => a.name === t.attendantName);

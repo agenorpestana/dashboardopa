@@ -274,19 +274,27 @@ app.get('/api/dashboard-data', async (req, res) => {
         }
     };
 
-    // Busca de Usuários (Atendentes) - Alterado de /atendente para /usuario
-    // Filtro: Status 'A' (Ativo) e Tipo 'user'
+    // Busca de Usuários (Atendentes)
     const attendantsPayload = {
         "filter": { "status": "A", "tipo": "user" },
         "options": { "limit": 100 }
     };
+    
+    // Busca de Clientes (Novo)
+    const clientsPayload = {
+        "options": { "limit": 500, "sort": "-_id" }
+    };
+
+    // Executa Promises
     const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, attendantsPayload);
+    const clientsPromise = requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, clientsPayload);
     
     // Busca de Tickets
     let ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadOptimized);
 
     let tickets = [];
     let attendants = [];
+    let clients = [];
     let debugMsg = "";
 
     // Lógica de Fallback para Tickets
@@ -316,7 +324,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       debugMsg += `Final Failure: ${ticketsRes.error}`;
     }
 
-    // Processar resposta de Atendentes (Usuários)
+    // Processar resposta de Atendentes
     const attendantsRes = await attendantsPromise;
     if (attendantsRes.ok && attendantsRes.data) {
       if (Array.isArray(attendantsRes.data.data)) {
@@ -324,9 +332,18 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(attendantsRes.data)) {
         attendants = attendantsRes.data;
       }
-      console.log(`[Proxy] Atendentes (Usuários) obtidos: ${attendants.length}`);
-    } else {
-      console.warn(`[Proxy] Erro ao buscar atendentes: ${attendantsRes.error}`);
+      console.log(`[Proxy] Atendentes obtidos: ${attendants.length}`);
+    }
+
+    // Processar resposta de Clientes
+    const clientsRes = await clientsPromise;
+    if (clientsRes.ok && clientsRes.data) {
+      if (Array.isArray(clientsRes.data.data)) {
+        clients = clientsRes.data.data;
+      } else if (Array.isArray(clientsRes.data)) {
+        clients = clientsRes.data;
+      }
+      console.log(`[Proxy] Clientes obtidos: ${clients.length}`);
     }
 
     // Retornar para o frontend
@@ -334,6 +351,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       success: true,
       tickets: tickets,
       attendants: attendants,
+      clients: clients, // Enviando lista de clientes
       debug_info: {
         msg: debugMsg,
         tickets_raw_count: tickets.length
