@@ -252,7 +252,6 @@ app.get('/api/dashboard-data', async (req, res) => {
     console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
 
     // TENTATIVA 1: Filtro Otimizado
-    // Adicionado "populate": ["id_cliente"] para trazer o nome do cliente em vez do ID
     const payloadOptimized = {
        "filter": {
           "dataInicialAbertura": startDate,
@@ -275,8 +274,13 @@ app.get('/api/dashboard-data', async (req, res) => {
         }
     };
 
-    // Busca de Atendentes
-    const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/atendente`, 'GET', token, null);
+    // Busca de Usuários (Atendentes) - Alterado de /atendente para /usuario
+    // Filtro: Status 'A' (Ativo) e Tipo 'user'
+    const attendantsPayload = {
+        "filter": { "status": "A", "tipo": "user" },
+        "options": { "limit": 100 }
+    };
+    const attendantsPromise = requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, attendantsPayload);
     
     // Busca de Tickets
     let ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadOptimized);
@@ -312,7 +316,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       debugMsg += `Final Failure: ${ticketsRes.error}`;
     }
 
-    // Processar resposta de Atendentes
+    // Processar resposta de Atendentes (Usuários)
     const attendantsRes = await attendantsPromise;
     if (attendantsRes.ok && attendantsRes.data) {
       if (Array.isArray(attendantsRes.data.data)) {
@@ -320,6 +324,9 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(attendantsRes.data)) {
         attendants = attendantsRes.data;
       }
+      console.log(`[Proxy] Atendentes (Usuários) obtidos: ${attendants.length}`);
+    } else {
+      console.warn(`[Proxy] Erro ao buscar atendentes: ${attendantsRes.error}`);
     }
 
     // Retornar para o frontend

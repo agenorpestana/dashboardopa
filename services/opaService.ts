@@ -87,7 +87,7 @@ export const opaService = {
         console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
         if(rawTickets.length > 0) console.log('[OpaService] Exemplo:', rawTickets[0]);
 
-        // 1. Criar mapa de Atendentes (ID -> Nome)
+        // 1. Criar mapa de Atendentes (ID -> Nome) e Lista Inicial
         const attendantMap = new Map<string, string>();
         
         let attendants: Attendant[] = rawAttendants.map((a: any) => {
@@ -95,11 +95,14 @@ export const opaService = {
           const name = a.nome || a.name || 'Agente';
           attendantMap.set(id, name);
           
+          // Mapeia status 'A' (Ativo da tabela de usuários) para 'online'
+          const isOnline = a.status === 'A' || a.status === 'ativo' || a.is_online;
+
           return {
             id,
             name,
-            status: (a.status === 'ativo' || a.is_online || a.situacao === 1) ? 'online' : 'busy',
-            activeChats: 0 
+            status: isOnline ? 'online' : 'busy',
+            activeChats: 0 // Será calculado abaixo
           };
         });
 
@@ -119,41 +122,29 @@ export const opaService = {
            let clientName = 'Cliente';
            let contact = 'N/A';
            
-           // 1. Prioridade: Campo "id_cliente" populado (objeto)
            if (t.id_cliente && typeof t.id_cliente === 'object') {
               clientName = t.id_cliente.nome || clientName;
               contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
            } 
-           // 2. Prioridade: Campo "cliente" explícito
            else if (t.cliente && typeof t.cliente === 'object' && t.cliente.nome) {
               clientName = t.cliente.nome;
            }
-           // 3. Prioridade: Campo "nome_cliente" (snake_case) na raiz
            else if (t.nome_cliente) {
               clientName = t.nome_cliente;
            }
-           // 4. Prioridade: Dados de "origem" (geralmente Push Name do WhatsApp)
            else if (t.origem && typeof t.origem === 'object') {
-              if (t.origem.nome) {
-                 clientName = t.origem.nome;
-              } else if (t.origem.apelido) {
-                 clientName = t.origem.apelido;
-              } else if (t.origem.senderName) {
-                 clientName = t.origem.senderName;
-              }
+              if (t.origem.nome) clientName = t.origem.nome;
+              else if (t.origem.apelido) clientName = t.origem.apelido;
+              else if (t.origem.senderName) clientName = t.origem.senderName;
            }
-           // 5. Fallback para nome antigo se existir
            else if (t.client_name) {
               clientName = t.client_name;
            }
 
-           // Se contato ainda é N/A, usa o do canal
            if (contact === 'N/A' && channelContact) {
               contact = channelContact;
            }
            
-           // Se o nome ainda for genérico "Cliente" E tivermos o contato, usamos o contato formatado como último recurso
-           // Mas apenas se realmente não achamos nenhum nome acima.
            if ((clientName === 'Cliente' || !clientName) && contact !== 'N/A') {
               if (contact.startsWith('55') && contact.length >= 12) {
                  clientName = formatPhoneNumber(contact);
@@ -162,11 +153,14 @@ export const opaService = {
               }
            }
 
-           // Atendente: Tenta pegar objeto, senão busca no mapa, senão usa 'Atendente'
+           // Atendente
            let attendantName = undefined;
+           // Tenta pelo objeto populado
            if (t.id_atendente && typeof t.id_atendente === 'object') {
               attendantName = t.id_atendente.nome;
-           } else if (t.id_atendente) {
+           } 
+           // Tenta pelo ID mapeado na lista de usuários que acabamos de buscar
+           else if (t.id_atendente) {
               attendantName = attendantMap.get(String(t.id_atendente));
            }
 
@@ -187,10 +181,22 @@ export const opaService = {
            };
         });
 
-        // 3. Filtrar finalizados (Garantia extra no front)
+        // 3. Filtrar finalizados
         const activeTickets = tickets.filter(t => t.status !== 'finished');
 
-        // 4. Se não veio lista de atendentes da API, improvisar com base nos tickets
+        // 4. Calcular Chats Ativos por Atendente
+        // Percorre os tickets ativos e incrementa o contador do atendente correspondente
+        activeTickets.forEach(t => {
+           if (t.status === 'in_service' && t.attendantName) {
+              // Tenta achar pelo nome (já que o ID pode variar entre ticket e user list dependendo da versão)
+              const att = attendants.find(a => a.name === t.attendantName);
+              if (att) {
+                 att.activeChats++;
+              }
+           }
+        });
+
+        // 5. Fallback se não veio lista de atendentes (usuários)
         if (attendants.length === 0 && activeTickets.length > 0) {
            const names = new Set<string>();
            activeTickets.forEach(t => {
@@ -199,6 +205,13 @@ export const opaService = {
            attendants = Array.from(names).map((name, i) => ({
              id: `gen-${i}`, name, status: 'online', activeChats: 0
            }));
+           // Recalcula contagem para esse fallback
+           activeTickets.forEach(t => {
+              if (t.status === 'in_service' && t.attendantName) {
+                 const att = attendants.find(a => a.name === t.attendantName);
+                 if (att) att.activeChats++;
+              }
+           });
         }
 
         return { tickets: activeTickets, attendants };
