@@ -57,12 +57,31 @@ function calculateSeconds(dateStr?: string): number {
 }
 
 // Helper to map API status string to internal TicketStatus
-function mapApiStatus(status?: string): TicketStatus {
-  if (!status) return 'waiting';
-  const s = status.toUpperCase();
-  // Opa Suite: EA = Em Atendimento, A = Aberto (Fila)
-  if (s === 'EA' || s === 'ATENDIMENTO' || s.includes('SERVICE')) return 'in_service';
-  if (s === 'F' || s === 'FINALIZADO' || s === 'R' || s === 'RESOLVIDO') return 'finished';
+function mapApiStatus(statusRaw?: string): TicketStatus {
+  if (!statusRaw) return 'waiting'; // Assumir fila se não tiver status
+  
+  const s = String(statusRaw).toUpperCase().trim();
+  
+  // Logs para ajudar no debug se aparecer algo novo
+  // console.log('Mapeando status:', s);
+
+  // LISTA DE STATUS - OPA SUITE E SIMILARES
+  // EA = Em Atendimento
+  // A = Aberto (Fila)
+  // P = Pendente (Fila)
+  // T = Triagem (Fila)
+  // F = Finalizado
+  // C = Cancelado
+  
+  if (['EA', 'EM ATENDIMENTO', 'ATENDIMENTO', 'IN_SERVICE', 'SERVING'].some(val => s.includes(val)) || s === 'EA') {
+    return 'in_service';
+  }
+  
+  if (['F', 'FINALIZADO', 'RESOLVIDO', 'CLOSED', 'R', 'C', 'CANCELADO'].some(val => s === val || s.includes(val))) {
+    return 'finished';
+  }
+  
+  // Qualquer outra coisa (A, P, T, Aberto, Pendente, Triagem) cai como fila
   return 'waiting';
 }
 
@@ -70,13 +89,10 @@ function mapApiStatus(status?: string): TicketStatus {
 export const opaService = {
   fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[] }> => {
     // 1. Try to fetch from our Local Proxy (Server.js)
-    // We ignore the passed 'config' for the fetch URL because server.js reads it securely from DB.
-    // However, we check if config exists in App state to know if we SHOULD attempt fetch.
     if (config.apiUrl && config.apiToken) {
       try {
         console.log(`[OpaService] Fetching data via local proxy...`);
         
-        // Call our own backend. This avoids CORS because it's same-origin.
         const response = await fetch('/api/dashboard-data');
 
         if (!response.ok) {
@@ -89,22 +105,46 @@ export const opaService = {
         const rawTickets = data.tickets || [];
         const rawAttendants = data.attendants || [];
 
-        console.log(`[OpaService] Tickets received: ${rawTickets.length}`);
+        console.log(`[OpaService] Raw Tickets received: ${rawTickets.length}`);
         
+        // --- DIAGNÓSTICO DE DEBUG ---
+        if (rawTickets.length > 0) {
+          // 1. Mostrar estrutura do primeiro ticket para verificar campos
+          console.log('[DEBUG] Estrutura do 1º Ticket:', rawTickets[0]);
+          
+          // 2. Listar todos os status únicos retornados pela API
+          const uniqueStatuses = [...new Set(rawTickets.map((t: any) => t.status))];
+          console.log('[DEBUG] Lista de Status Encontrados na API:', uniqueStatuses);
+        }
+        // ---------------------------
+
         // Map Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
+           // Normalização de campos para lidar com variações da API
+           const rawStatus = t.status || t.situacao || t.state;
+           const mappedStatus = mapApiStatus(rawStatus);
+           const dateField = t.date || t.created_at || t.started_at || t.data_criacao;
+           
            return {
               id: String(t._id || t.id),
-              protocol: t.protocolo || t.protocol || `PROT-${t._id?.substring(0,6)}`,
-              clientName: t.id_cliente?.nome || t.client_name || 'Cliente Desconhecido',
+              protocol: t.protocolo || t.protocol || `PROT-${String(t._id || t.id).substring(0,6)}`,
+              clientName: t.id_cliente?.nome || t.client_name || t.contact?.name || 'Cliente Desconhecido',
               contact: t.id_cliente?.cpf_cnpj || t.id_cliente?.telefone || t.contact || 'N/A',
-              waitTimeSeconds: calculateSeconds(t.date || t.created_at || t.started_at),
-              durationSeconds: (t.status === 'EA') ? calculateSeconds(t.date) : undefined,
-              status: mapApiStatus(t.status),
-              attendantName: t.id_atendente?.nome || t.attendant_name,
-              department: t.setor?.toString() || 'Geral'
+              waitTimeSeconds: calculateSeconds(dateField),
+              // Se status for EA, duração é calculada. Se não, é undefined.
+              durationSeconds: (mappedStatus === 'in_service') ? calculateSeconds(dateField) : undefined,
+              status: mappedStatus,
+              attendantName: t.id_atendente?.nome || t.attendant_name || t.agent?.name,
+              department: t.setor?.nome || t.setor?.toString() || t.department || 'Geral'
            };
-        }).filter((t: Ticket) => t.status !== 'finished');
+        });
+
+        // Filtrar finalizados. 
+        // IMPORTANTE: Se o dashboard estiver vazio, verifique o log [DEBUG] Status Encontrados.
+        // Se só tiver status "F" ou "FINALIZADO", a API está enviando histórico antigo.
+        const activeTickets = tickets.filter((t: Ticket) => t.status !== 'finished');
+        
+        console.log(`[OpaService] Tickets Ativos (pós-filtro): ${activeTickets.length}`);
 
         // Map Attendants
         let attendants: Attendant[] = rawAttendants.map((a: any) => ({
@@ -114,10 +154,10 @@ export const opaService = {
           activeChats: 0
         }));
 
-        // Fallback: If agents endpoint failed (empty array), try to extract from active tickets
-        if (attendants.length === 0 && tickets.length > 0) {
+        // Fallback: Se a lista de atendentes vier vazia, extrair dos tickets ativos
+        if (attendants.length === 0 && activeTickets.length > 0) {
            const agentMap = new Map<string, number>();
-           tickets.forEach(t => {
+           activeTickets.forEach(t => {
               if (t.status === 'in_service' && t.attendantName) {
                  agentMap.set(t.attendantName, (agentMap.get(t.attendantName) || 0) + 1);
               }
@@ -125,7 +165,7 @@ export const opaService = {
            
            agentMap.forEach((count, name) => {
               attendants.push({
-                 id: `inf-${name}`,
+                 id: `inf-${name.replace(/\s+/g, '')}`,
                  name,
                  status: 'online',
                  activeChats: count
@@ -133,7 +173,7 @@ export const opaService = {
            });
         }
 
-        return { tickets, attendants };
+        return { tickets: activeTickets, attendants };
 
       } catch (error) {
         console.warn("[OpaService] Proxy connection issue, falling back to mock:", error);
