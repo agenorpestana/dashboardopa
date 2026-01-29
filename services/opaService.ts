@@ -74,8 +74,9 @@ function mapApiStatus(statusRaw?: any): TicketStatus {
   // Com o Bot ('AG')
   if (s === 'AG' || s === 'AGUARDANDO') return 'bot';
 
-  // Em Espera / Aguardando Atendimento ('A')
-  if (s === 'AB' || s === 'ABERTO' || s === '1' || s === 'T') return 'waiting';
+  // Em Espera ('E') / Aberto ('A')
+  // Atualizado para incluir 'E' (Em Espera) conforme solicitado
+  if (s === 'E' || s === 'EM ESPERA' || s === 'A' || s === 'ABERTO' || s === '1' || s === 'T') return 'waiting';
   
   // Finalizado
   if (s === 'F' || s === 'FINALIZADO' || s === '3' || s === '4') return 'finished';
