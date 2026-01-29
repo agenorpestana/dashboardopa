@@ -56,28 +56,30 @@ function calculateSeconds(dateStr?: string): number {
   return Math.max(0, Math.floor((now - start) / 1000));
 }
 
-// Helper to map API status string to internal TicketStatus
-function mapApiStatus(statusRaw?: string): TicketStatus {
-  if (!statusRaw) return 'waiting'; // Assumir fila se não tiver status
-  
-  const s = String(statusRaw).toUpperCase().trim();
-  
-  // Logs para ajudar no debug se aparecer algo novo
-  // console.log('Mapeando status:', s);
+// Helper to map API status string/object to internal TicketStatus
+function mapApiStatus(statusRaw?: any): TicketStatus {
+  if (!statusRaw) return 'waiting'; 
 
-  // LISTA DE STATUS - OPA SUITE E SIMILARES
-  // EA = Em Atendimento
-  // A = Aberto (Fila)
-  // P = Pendente (Fila)
-  // T = Triagem (Fila)
-  // F = Finalizado
-  // C = Cancelado
+  // Normalizar: se for objeto (ex: {id: 2, nome: "Em Atendimento"}), pegar id ou nome
+  let s = '';
+  if (typeof statusRaw === 'object' && statusRaw !== null) {
+     s = String(statusRaw.id || statusRaw.nome || statusRaw.name || '').toUpperCase();
+  } else {
+     s = String(statusRaw).toUpperCase().trim();
+  }
+
+  // Mapeamento por ID Numérico (Comum em versões recentes do OPA)
+  // 1 = Pendente/Fila, 2 = Em Atendimento, 3 = Finalizado, 4 = Cancelado
+  if (s === '2') return 'in_service';
+  if (s === '1') return 'waiting';
+  if (s === '3' || s === '4') return 'finished';
   
-  if (['EA', 'EM ATENDIMENTO', 'ATENDIMENTO', 'IN_SERVICE', 'SERVING'].some(val => s.includes(val)) || s === 'EA') {
+  // Mapeamento por Texto
+  if (['EA', 'EM ATENDIMENTO', 'ATENDIMENTO', 'IN_SERVICE', 'SERVING', 'EXECUCAO'].some(val => s.includes(val)) || s === 'EA') {
     return 'in_service';
   }
   
-  if (['F', 'FINALIZADO', 'RESOLVIDO', 'CLOSED', 'R', 'C', 'CANCELADO'].some(val => s === val || s.includes(val))) {
+  if (['F', 'FINALIZADO', 'RESOLVIDO', 'CLOSED', 'R', 'C', 'CANCELADO', 'ENCERRADO'].some(val => s === val || s.includes(val))) {
     return 'finished';
   }
   
@@ -101,29 +103,48 @@ export const opaService = {
 
         const data = await response.json();
         
-        // Data comes pre-structured from our server proxy
+        // Log Debug Info do Server se existir
+        if (data.debug_info) {
+          console.log('[OpaService] Server Debug:', data.debug_info);
+        }
+
         const rawTickets = data.tickets || [];
         const rawAttendants = data.attendants || [];
 
         console.log(`[OpaService] Raw Tickets received: ${rawTickets.length}`);
         
-        // --- DIAGNÓSTICO DE DEBUG ---
+        // --- DIAGNÓSTICO AVANÇADO ---
         if (rawTickets.length > 0) {
-          // 1. Mostrar estrutura do primeiro ticket para verificar campos
-          console.log('[DEBUG] Estrutura do 1º Ticket:', rawTickets[0]);
+          console.groupCollapsed('[DEBUG] Análise de Dados da API');
+          console.log('Exemplo do 1º Ticket (Raw):', rawTickets[0]);
           
-          // 2. Listar todos os status únicos retornados pela API
-          const uniqueStatuses = [...new Set(rawTickets.map((t: any) => t.status))];
-          console.log('[DEBUG] Lista de Status Encontrados na API:', uniqueStatuses);
+          // Verificar quais campos de status existem
+          const sample = rawTickets[0];
+          console.log('Campos de Status detectados:', {
+             status: sample.status,
+             situacao: sample.situacao,
+             state: sample.state,
+             stage: sample.stage
+          });
+          
+          const uniqueStatuses = [...new Set(rawTickets.map((t: any) => {
+             const s = t.status || t.situacao || t.state;
+             return typeof s === 'object' ? JSON.stringify(s) : s;
+          }))];
+          console.log('Status Únicos Encontrados:', uniqueStatuses);
+          console.groupEnd();
+        } else {
+          console.warn('[OpaService] ATENÇÃO: Nenhum ticket retornado pelo Proxy. Verifique se o backend conseguiu conectar.');
         }
         // ---------------------------
 
         // Map Tickets
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            // Normalização de campos para lidar com variações da API
-           const rawStatus = t.status || t.situacao || t.state;
+           // Tenta 'situacao' primeiro, pois é comum ser o ID numérico
+           const rawStatus = t.situacao || t.status || t.state;
            const mappedStatus = mapApiStatus(rawStatus);
-           const dateField = t.date || t.created_at || t.started_at || t.data_criacao;
+           const dateField = t.date || t.created_at || t.started_at || t.data_criacao || t.data_inicio;
            
            return {
               id: String(t._id || t.id),
@@ -131,7 +152,6 @@ export const opaService = {
               clientName: t.id_cliente?.nome || t.client_name || t.contact?.name || 'Cliente Desconhecido',
               contact: t.id_cliente?.cpf_cnpj || t.id_cliente?.telefone || t.contact || 'N/A',
               waitTimeSeconds: calculateSeconds(dateField),
-              // Se status for EA, duração é calculada. Se não, é undefined.
               durationSeconds: (mappedStatus === 'in_service') ? calculateSeconds(dateField) : undefined,
               status: mappedStatus,
               attendantName: t.id_atendente?.nome || t.attendant_name || t.agent?.name,
@@ -139,12 +159,17 @@ export const opaService = {
            };
         });
 
-        // Filtrar finalizados. 
-        // IMPORTANTE: Se o dashboard estiver vazio, verifique o log [DEBUG] Status Encontrados.
-        // Se só tiver status "F" ou "FINALIZADO", a API está enviando histórico antigo.
+        // IMPORTANTE: Agora mostramos no console quantos ficaram em cada status após o mapeamento
+        const countByStatus = tickets.reduce((acc: any, t) => {
+            acc[t.status] = (acc[t.status] || 0) + 1;
+            return acc;
+        }, {});
+        console.log('[OpaService] Contagem pós-mapeamento:', countByStatus);
+
+        // Filtrar finalizados apenas para a UI
         const activeTickets = tickets.filter((t: Ticket) => t.status !== 'finished');
         
-        console.log(`[OpaService] Tickets Ativos (pós-filtro): ${activeTickets.length}`);
+        console.log(`[OpaService] Tickets Ativos para UI: ${activeTickets.length}`);
 
         // Map Attendants
         let attendants: Attendant[] = rawAttendants.map((a: any) => ({

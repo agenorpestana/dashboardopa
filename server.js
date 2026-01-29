@@ -173,25 +173,22 @@ app.get('/api/dashboard-data', async (req, res) => {
       'Content-Type': 'application/json'
     };
 
-    console.log(`[Proxy] Iniciando busca multi-estratégia em: ${baseUrl}`);
+    console.log(`[Proxy] Iniciando busca robusta em: ${baseUrl}`);
 
     // 2. Definir URLs Variadas
-    // Tentamos todas as variações possíveis de parâmetros para garantir que pegamos os dados
+    // Algumas versões usam status (texto), outras situacao (int)
     const endpoints = [
-      // Padrão: Status Curtos
+      // 1. Tentar por Códigos Numéricos (Mais confiável em versões recentes)
+      // 2 = Em Atendimento, 1 = Pendente/Fila
+      { url: `${baseUrl}/api/v1/atendimento?situacao=2`, label: 'Situação 2 (Atendimento)' },
+      { url: `${baseUrl}/api/v1/atendimento?situacao=1`, label: 'Situação 1 (Fila)' },
+      
+      // 2. Tentar por Siglas (Versões antigas ou específicas)
       { url: `${baseUrl}/api/v1/atendimento?status=EA`, label: 'Status EA' },
       { url: `${baseUrl}/api/v1/atendimento?status=A`,  label: 'Status A' },
       { url: `${baseUrl}/api/v1/atendimento?status=P`,  label: 'Status P' },
       
-      // Padrão: Situacao (algumas versões usam 'situacao' em vez de 'status')
-      { url: `${baseUrl}/api/v1/atendimento?situacao=EA`, label: 'Situacao EA' },
-      { url: `${baseUrl}/api/v1/atendimento?situacao=A`,  label: 'Situacao A' },
-      
-      // Padrão: Status Extenso
-      { url: `${baseUrl}/api/v1/atendimento?status=EM%20ATENDIMENTO`, label: 'Status EM ATENDIMENTO' },
-      { url: `${baseUrl}/api/v1/atendimento?status=AGUARDANDO`, label: 'Status AGUARDANDO' },
-      
-      // Atendentes
+      // 3. Atendentes
       { url: `${baseUrl}/api/v1/atendente`, label: 'Atendentes' }
     ];
 
@@ -202,7 +199,8 @@ app.get('/api/dashboard-data', async (req, res) => {
            if (!r.ok) return { label: ep.label, error: r.status, items: [] };
            try {
              const json = await r.json();
-             const items = Array.isArray(json) ? json : (json.data || json.items || []);
+             // Tenta encontrar o array de dados em várias propriedades comuns
+             const items = Array.isArray(json) ? json : (json.data || json.items || json.payload || []);
              return { label: ep.label, ok: true, items };
            } catch(e) {
              return { label: ep.label, error: 'JSON Parse', items: [] };
@@ -220,33 +218,40 @@ app.get('/api/dashboard-data', async (req, res) => {
     results.forEach(res => {
       if (res.label === 'Atendentes') {
         attendantsData = res.items;
-        console.log(`[Proxy] Atendentes: ${attendantsData.length}`);
       } else {
         if (res.items.length > 0) {
            console.log(`[Proxy] ${res.label}: ${res.items.length} tickets encontrados.`);
            allTickets = [...allTickets, ...res.items];
-        } else {
-           // Log silencioso para não poluir demais, a menos que seja erro
-           if (res.error) console.warn(`[Proxy] ${res.label} falhou: ${res.error}`);
         }
       }
     });
 
-    // 5. Fallback: Se NENHUM filtro funcionou, tentar buscar TUDO mas ordenar por ID decrescente
-    // (Última esperança para pegar recentes se os filtros de status falharem)
+    // 5. Fallback Agressivo
+    // Se não encontramos NADA com os filtros, buscar os últimos 100 tickets sem filtro
     if (allTickets.length === 0) {
-       console.log('[Proxy] Nenhum ticket encontrado com filtros. Tentando fallback (sem filtro, 50 recentes)...');
-       try {
-         const fallbackUrl = `${baseUrl}/api/v1/atendimento?limit=50&sort=-id`; 
-         const fbRes = await fetch(fallbackUrl, { headers });
-         if (fbRes.ok) {
-            const fbJson = await fbRes.json();
-            const fbItems = Array.isArray(fbJson) ? fbJson : (fbJson.data || fbJson.items || []);
-            console.log(`[Proxy] Fallback retornou ${fbItems.length} itens.`);
-            allTickets = fbItems;
-         }
-       } catch (e) {
-         console.error('[Proxy] Fallback falhou:', e);
+       console.log('[Proxy] Filtros específicos retornaram vazio. Executando Fallback Agressivo (100 recentes)...');
+       
+       // Tenta variações de ordenação
+       const fallbackUrls = [
+          `${baseUrl}/api/v1/atendimento?limit=100&sort=-id`, 
+          `${baseUrl}/api/v1/atendimento?limit=100&order=desc`
+       ];
+       
+       for (const url of fallbackUrls) {
+          if (allTickets.length > 0) break;
+          try {
+             const fbRes = await fetch(url, { headers });
+             if (fbRes.ok) {
+                const fbJson = await fbRes.json();
+                const fbItems = Array.isArray(fbJson) ? fbJson : (fbJson.data || fbJson.items || []);
+                if (fbItems.length > 0) {
+                   console.log(`[Proxy] Fallback via ${url} retornou ${fbItems.length} itens.`);
+                   allTickets = fbItems;
+                }
+             }
+          } catch (e) {
+             console.error('[Proxy] Erro no fallback:', e.message);
+          }
        }
     }
 
@@ -259,13 +264,17 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const uniqueTickets = Array.from(uniqueTicketsMap.values());
 
-    console.log(`[Proxy] Total FINAL consolidado de tickets: ${uniqueTickets.length}`);
+    console.log(`[Proxy] Total consolidado enviando para frontend: ${uniqueTickets.length}`);
 
     // 7. Retornar
     res.json({
       success: true,
       tickets: uniqueTickets,
-      attendants: attendantsData
+      attendants: attendantsData,
+      debug_info: {
+        total_fetched: uniqueTickets.length,
+        sources: results.map(r => `${r.label}: ${r.items.length}`).join(', ')
+      }
     });
 
   } catch (error) {
