@@ -150,6 +150,73 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// Rota Proxy para contornar CORS
+// O servidor faz a requisição para a API externa e retorna o resultado para o frontend
+app.get('/api/dashboard-data', async (req, res) => {
+  try {
+    // 1. Obter credenciais do banco
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    // @ts-ignore
+    const config = rows[0];
+
+    if (!config || !config.api_url || !config.api_token) {
+      return res.status(400).json({ error: 'Configurações de API não encontradas.' });
+    }
+
+    const baseUrl = config.api_url.replace(/\/$/, '').trim();
+    const headers = { 
+      'Authorization': `Bearer ${config.api_token.trim()}`,
+      'Content-Type': 'application/json'
+    };
+
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}`);
+
+    // 2. Buscar dados no servidor externo (Node.js não tem CORS)
+    // Usamos Promise.allSettled para não falhar tudo se apenas um endpoint falhar
+    const [ticketsRes, attendantsRes] = await Promise.allSettled([
+      fetch(`${baseUrl}/api/v1/atendimento`, { headers }), 
+      fetch(`${baseUrl}/api/v1/atendente`, { headers })
+    ]);
+
+    let ticketsData = [];
+    let attendantsData = [];
+
+    // Processar Atendimentos
+    if (ticketsRes.status === 'fulfilled') {
+       if (ticketsRes.value.ok) {
+         const json = await ticketsRes.value.json();
+         // Opa pode retornar array direto ou { data: [] }
+         ticketsData = Array.isArray(json) ? json : (json.data || json.items || []);
+       } else {
+         console.warn(`[Proxy] Erro API Tickets: ${ticketsRes.value.status}`);
+       }
+    } else {
+      console.error('[Proxy] Falha na requisição de tickets:', ticketsRes.reason);
+    }
+
+    // Processar Atendentes
+    if (attendantsRes.status === 'fulfilled') {
+       if (attendantsRes.value.ok) {
+         const json = await attendantsRes.value.json();
+         attendantsData = Array.isArray(json) ? json : (json.data || []);
+       } else {
+         console.warn(`[Proxy] Erro API Atendentes: ${attendantsRes.value.status}`);
+       }
+    }
+
+    // 3. Retornar dados combinados para o frontend
+    res.json({
+      success: true,
+      tickets: ticketsData,
+      attendants: attendantsData
+    });
+
+  } catch (error) {
+    console.error('[Proxy] Erro geral:', error);
+    res.status(500).json({ error: 'Erro interno no servidor proxy.' });
+  }
+});
+
 // SPA Fallback - Para qualquer rota não-API, serve o index.html
 app.get('*', (req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
