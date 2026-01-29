@@ -225,6 +225,13 @@ function requestWithBody(urlStr, method, token, bodyData = null) {
   });
 }
 
+// Helpers de Data
+const getPastDate = (days) => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().split('T')[0]; // YYYY-MM-DD
+};
+
 // Rota Proxy Principal
 app.get('/api/dashboard-data', async (req, res) => {
   try {
@@ -239,13 +246,19 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = normalizeUrl(config.api_url);
     const token = config.api_token.trim();
 
-    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
+    // Data de início (Últimos 30 dias para pegar atendimentos abertos que podem estar parados, mas garantir que são recentes)
+    const startDate = getPastDate(30);
 
-    // Payload conforme documentação: LIMIT e SORT para pegar os mais novos
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento desde ${startDate}`);
+
+    // Payload com Filtro de Data
     const payload = {
+       "filter": {
+          "dataInicialAbertura": startDate
+       },
        "options": { 
-          "limit": 100,
-          "sort": "-_id" // Tenta ordenar por ID decrescente (mais novos primeiro)
+          "limit": 300,
+          "sort": "-_id" 
        }
     };
 
@@ -274,11 +287,10 @@ app.get('/api/dashboard-data', async (req, res) => {
       console.warn(`[Proxy] Falha Tickets: ${ticketsRes.error}`);
       debugMsg += `Tickets: ${ticketsRes.error} `;
       
-      // Fallback
-      if (ticketsRes.status === 400 || ticketsRes.status === 403) {
-         console.log('[Proxy] Tentando fallback sem body...');
-         // Adiciona sort na URL também
-         const fallbackRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=50&sort=-_id`, 'GET', token, null);
+      // Fallback simples sem filtro (caso a API não aceite dataInicialAbertura)
+      if (ticketsRes.status === 400 || ticketsRes.status === 403 || tickets.length === 0) {
+         console.log('[Proxy] Tentando fallback sem filtro de data...');
+         const fallbackRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=100`, 'GET', token, null);
          if (fallbackRes.ok && fallbackRes.data) {
             const fbData = Array.isArray(fallbackRes.data.data) ? fallbackRes.data.data : fallbackRes.data;
             if (Array.isArray(fbData)) {
