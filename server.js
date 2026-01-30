@@ -111,7 +111,7 @@ function requestWithBody(urlStr, method, token, bodyData = null) {
             const parsed = JSON.parse(data);
             resolve({ ok: res.statusCode < 300, data: parsed }); 
           }
-          catch (e) { resolve({ ok: false, error: 'JSON Parse' }); }
+          catch (e) { resolve({ ok: false, error: 'JSON Parse Error' }); }
         });
       });
       req.on('error', (e) => resolve({ ok: false, error: e.message }));
@@ -127,52 +127,55 @@ app.get('/api/dashboard-data', async (req, res) => {
     // @ts-ignore
     const config = rows[0];
     if (!config) return res.status(400).json({ error: 'Config missing' });
+    
     const baseUrl = config.api_url.replace(/\/$/, '');
     const token = config.api_token;
 
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 30);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    // Conforme documentação, usamos 'dataInicialAbertura' para filtrar o histórico
+    const dateLimit = new Date();
+    dateLimit.setDate(dateLimit.getDate() - 7);
+    const dateLimitStr = dateLimit.toISOString().split('T')[0];
 
-    // População exaustiva para garantir que nomes venham preenchidos
-    const populateFields = [
-      "id_cliente", 
-      "id_atendente", 
-      "id_departamento", 
-      "setor", 
-      "id_contato", 
-      "cliente", 
-      "contato"
-    ];
+    // Populate Fields conforme documentação exemplo: "id_cliente", "id_atendente", "id_motivo_atendimento"
+    const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
 
-    const [activeRes, historyRes, uRes, dRes] = await Promise.all([
+    const [activeRes, historyRes, uRes] = await Promise.all([
+      // Atendimentos Ativos (Status diferente de F)
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
-        "options": { "limit": 1000, "sort": "-data_criacao", "populate": populateFields }
+        "options": { "limit": 500, "populate": populate }
       }),
+      // Histórico Recente (Status igual a F)
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": "F", "data_abertura": { "$gte": startDateStr } },
-        "options": { "limit": 2000, "sort": "-data_fechamento", "populate": populateFields }
+        "filter": { "status": "F", "dataInicialAbertura": dateLimitStr },
+        "options": { "limit": 500, "populate": populate }
       }),
-      requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, { "filter": { "status": "A" }, "options": { "limit": 200 } }),
-      requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })
+      // Usuários Ativos
+      requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
+        "filter": { "status": "A" },
+        "options": { "limit": 100 }
+      })
     ]);
 
-    let activeTickets = activeRes.ok ? (activeRes.data.data || activeRes.data) : [];
-    let historyTickets = historyRes.ok ? (historyRes.data.data || historyRes.data) : [];
+    // O Opa Suite retorna os dados em .data ou .data.data dependendo da versão
+    const getList = (res) => {
+      if (!res.ok) return [];
+      return res.data.data || res.data || [];
+    };
 
-    if (!Array.isArray(activeTickets)) activeTickets = [];
-    if (!Array.isArray(historyTickets)) historyTickets = [];
+    const tickets = [...getList(activeRes), ...getList(historyRes)];
+    const attendants = getList(uRes);
 
     res.json({
       success: true,
-      tickets: [...activeTickets, ...historyTickets],
-      attendants: uRes.ok ? (uRes.data.data || uRes.data) : [],
-      departments: dRes.ok ? (dRes.data.data || dRes.data) : []
+      tickets,
+      attendants
     });
 
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  } catch (error) { 
+    res.status(500).json({ error: error.message }); 
+  }
 });
 
 app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
-app.listen(port, () => console.log(`Dashboard rodando na porta ${port}`));
+app.listen(port, () => console.log(`Backend rodando na porta ${port}`));
