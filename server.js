@@ -93,7 +93,11 @@ function requestWithBody(urlStr, method, token, bodyData = null) {
       const bodyString = bodyData ? JSON.stringify(bodyData) : '';
       const options = {
         method,
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyString) },
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json', 
+          'Content-Length': Buffer.byteLength(bodyString) 
+        },
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname + url.search,
@@ -103,7 +107,10 @@ function requestWithBody(urlStr, method, token, bodyData = null) {
         let data = '';
         res.on('data', (chunk) => data += chunk);
         res.on('end', () => {
-          try { resolve({ ok: res.statusCode < 300, data: JSON.parse(data) }); }
+          try { 
+            const parsed = JSON.parse(data);
+            resolve({ ok: res.statusCode < 300, data: parsed }); 
+          }
           catch (e) { resolve({ ok: false, error: 'JSON Parse' }); }
         });
       });
@@ -122,27 +129,46 @@ app.get('/api/dashboard-data', async (req, res) => {
     if (!config) return res.status(400).json({ error: 'Config missing' });
     const baseUrl = config.api_url.replace(/\/$/, '');
     const token = config.api_token;
+
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    const ticketsPayload = {
-      "filter": { "dataInicialAbertura": startDateStr },
-      "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "setor", "id_departamento"] }
+    // BUSCA 1: Tickets ATIVOS (Garante que nunca sumam)
+    const activePayload = {
+      "filter": { "status": { "$ne": "F" } },
+      "options": { "limit": 500, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor"] }
     };
 
-    const [tRes, uRes, dRes] = await Promise.all([
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, ticketsPayload),
+    // BUSCA 2: Tickets FINALIZADOS (Para métricas e ranking)
+    const historyPayload = {
+      "filter": { "status": "F", "dataInicialAbertura": startDateStr },
+      "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor"] }
+    };
+
+    const [activeRes, historyRes, uRes, dRes] = await Promise.all([
+      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, activePayload),
+      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, historyPayload),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, { "filter": { "status": "A" }, "options": { "limit": 200 } }),
       requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })
     ]);
 
+    const activeTickets = activeRes.ok ? (activeRes.data.data || activeRes.data) : [];
+    const historyTickets = historyRes.ok ? (historyRes.data.data || historyRes.data) : [];
+
+    // Combinar as duas listas
+    const allTickets = Array.isArray(activeTickets) ? [...activeTickets] : [];
+    if (Array.isArray(historyTickets)) {
+       allTickets.push(...historyTickets);
+    }
+
     res.json({
       success: true,
-      tickets: tRes.ok ? (tRes.data.data || tRes.data) : [],
+      tickets: allTickets,
       attendants: uRes.ok ? (uRes.data.data || uRes.data) : [],
       departments: dRes.ok ? (dRes.data.data || dRes.data) : []
     });
+
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 

@@ -10,23 +10,26 @@ function calculateSeconds(dateStr?: string): number {
 
 function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
   const statusRaw = t.status || t.situacao;
-  if (!statusRaw) return 'finished'; 
-  const s = String(statusRaw).toUpperCase().trim();
+  const s = statusRaw ? String(statusRaw).toUpperCase().trim() : '';
 
-  // Se tem atendente e não está finalizado, é in_service
-  if (t.id_atendente && !['F', '3', '4', 'FINALIZADO'].includes(s)) {
+  // 1. FINALIZADO: Se o status for F ou códigos de finalização
+  if (['F', '3', '4', 'FINALIZADO'].includes(s)) {
+    return 'finished';
+  }
+
+  // 2. EM ATENDIMENTO: Se tem atendente atribuído E não está finalizado
+  if (t.id_atendente || ['EA', 'EM ATENDIMENTO', '2'].includes(s)) {
     return 'in_service';
   }
 
-  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) return 'in_service';
-  
-  if (['AG', 'AGUARDANDO', 'BOT', 'PS', 'E', 'EE', 'EM ESPERA', '1', 'T'].includes(s)) {
+  // 3. BOT ou ESPERA:
+  if (['AG', 'AGUARDANDO', 'BOT', 'PS', 'E', 'EE', 'EM ESPERA', '1', 'T'].includes(s) || s === '') {
      if (s === 'PS') return 'bot';
+     // Se tem departamento/setor, está na fila humana (Espera)
      const hasDept = departmentName && departmentName !== 'Geral' && departmentName !== 'Sem Setor';
      return hasDept ? 'waiting' : 'bot';
   }
 
-  if (['F', 'FINALIZADO', '3', '4'].includes(s)) return 'finished';
   return 'finished'; 
 }
 
@@ -42,9 +45,11 @@ export const opaService = {
       const rawAttendants = data.attendants || [];
       const rawDepartments = data.departments || [];
 
+      // Mapeamento de departamentos para busca rápida
       const deptMap = new Map();
       rawDepartments.forEach((d: any) => deptMap.set(String(d._id || d.id), d.nome));
 
+      // Mapeamento de atendentes para busca rápida
       const attMap = new Map();
       const attendants: Attendant[] = rawAttendants.map((a: any) => {
         const id = String(a._id || a.id);
@@ -54,20 +59,22 @@ export const opaService = {
       });
 
       const tickets: Ticket[] = rawTickets.map((t: any) => {
-        const rawDept = t.setor || t.id_departamento;
+        const rawDept = t.setor || t.id_departamento || t.departamento;
         let deptName = '';
-        if (typeof rawDept === 'object') deptName = rawDept.nome;
+        if (typeof rawDept === 'object' && rawDept?.nome) deptName = rawDept.nome;
         else if (deptMap.has(String(rawDept))) deptName = deptMap.get(String(rawDept));
 
         const status = determineTicketStatus(t, deptName);
         const dateStart = t.data_inicio || t.data_criacao || t.date;
         const dateEnd = t.data_fechamento || t.updated_at;
 
+        // Resolução do nome do cliente
         let clientName = 'Cliente';
         if (t.id_cliente?.nome) clientName = t.id_cliente.nome;
         else if (t.nome_cliente) clientName = t.nome_cliente;
         else if (t.cliente?.nome) clientName = t.cliente.nome;
 
+        // Resolução do nome do atendente
         let attName = undefined;
         if (t.id_atendente?.nome) attName = t.id_atendente.nome;
         else if (attMap.has(String(t.id_atendente))) attName = attMap.get(String(t.id_atendente));
@@ -78,7 +85,7 @@ export const opaService = {
           clientName,
           contact: '',
           waitTimeSeconds: calculateSeconds(dateStart),
-          durationSeconds: (status === 'in_service' || status === 'finished') ? calculateSeconds(dateStart) : 0,
+          durationSeconds: calculateSeconds(dateStart),
           status,
           attendantName: attName,
           department: deptName || 'Geral',
@@ -87,6 +94,7 @@ export const opaService = {
         };
       });
 
+      // Contagem de chats ativos para os atendentes
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
@@ -96,7 +104,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error(e);
+      console.error("[OpaService] Erro fatal:", e);
       return { tickets: [], attendants: [] };
     }
   }
