@@ -6,11 +6,14 @@ function calculateSeconds(startStr?: string, endStr?: string): number {
   try {
     const start = new Date(startStr).getTime();
     if (isNaN(start)) return 0;
+    
+    // Usamos o tempo do servidor se disponível, ou o tempo local
     const end = endStr ? new Date(endStr).getTime() : new Date().getTime();
     if (isNaN(end)) return 0;
     
     const diff = Math.floor((end - start) / 1000);
-    return diff > 0 ? diff : 0;
+    // Se a diferença for negativa (drift de relógio), retornamos pelo menos 1 segundo se o ticket existir
+    return diff > 0 ? diff : 1;
   } catch {
     return 0;
   }
@@ -83,49 +86,49 @@ export const opaService = {
 
         const status = determineTicketStatus(t, deptName);
         
-        // DATAS PARA CÁLCULO (Opa usa diversos nomes de campos conforme a versão)
-        const dateCreated = t.data_criacao || t.data_abertura || t.createdAt;
-        const dateStarted = t.data_inicio || t.data_atendimento || t.dt_inicio; 
-        const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt;
+        // MAPEAMENTO DE DATAS (Opa Suite é inconsistente entre versões)
+        const dateCreated = t.data_criacao || t.data_abertura || t.createdAt || t.data_cad;
+        const dateStarted = t.data_inicio || t.data_atendimento || t.dt_atendimento || t.dt_inicio; 
+        const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt || t.data_fin;
 
-        // RESOLUÇÃO DE NOME (EXAUSTIVA)
+        // RESOLUÇÃO DE NOME AVANÇADA
         let nameFound = null;
-        const possibleNames = [
-          t.cliente_nome,
-          t.id_cliente?.nome,
+        
+        // 1. Tentar campos de nome direto
+        const prioritizedNames = [
           t.id_cliente?.razao_social,
+          t.id_cliente?.nome,
           t.id_contato?.nome,
+          t.cliente_nome,
           t.contato_nome,
           t.nome_cliente,
-          t.id_cliente_nome,
-          t.cliente?.nome,
           t.nome
         ];
 
-        for (const n of possibleNames) {
+        for (const n of prioritizedNames) {
           const val = n ? String(n).trim() : '';
-          // Ignora nomes que são apenas "Cliente" ou números (prováveis protocolos)
-          if (val && val.toLowerCase() !== 'cliente' && !/^[A-Z]{2,3}\d+$/.test(val)) {
+          // Se o valor NÃO for o protocolo (ex: ITL...) e NÃO for "Cliente", usamos ele.
+          if (val && 
+              val.toLowerCase() !== 'cliente' && 
+              !/^[A-Z]{2,4}\d{6,}/.test(val) && // Regex mais específica para protocolos Opa
+              val.length > 3) {
             nameFound = val;
             break;
           }
         }
 
-        // Fallback 1: Telefone
+        // 2. Se não achou nome real, tentar telefone
         if (!nameFound) {
-          const possiblePhones = [t.contato_fone, t.fone, t.id_contato?.fone, t.id_cliente?.fone];
-          for (const p of possiblePhones) {
-            const formatted = formatPhone(p);
-            if (formatted && formatted.length > 5) {
-              nameFound = formatted;
-              break;
-            }
+          const phone = t.id_contato?.fone || t.id_cliente?.fone || t.contato_fone || t.fone;
+          const formatted = formatPhone(phone);
+          if (formatted && formatted.length > 5) {
+            nameFound = formatted;
           }
         }
 
-        // Fallback Final: Protocolo (Só se não achar NADA)
+        // 3. Fallback: Se ainda estiver vazio ou for apenas o protocolo, tenta pegar o protocolo formatado
         if (!nameFound) {
-          nameFound = t.protocolo || `Chat #${String(t._id || t.id).slice(-5)}`;
+          nameFound = t.protocolo || `Ticket ${String(t._id || t.id).slice(-6)}`;
         }
 
         let attName = undefined;
@@ -137,9 +140,10 @@ export const opaService = {
           protocol: t.protocolo || 'N/A',
           clientName: nameFound,
           contact: '',
-          // Espera: Sempre calculada a partir da criação
+          // Espera: da criação ao início. Se ainda não iniciou, usa data atual.
           waitTimeSeconds: calculateSeconds(dateCreated, dateStarted || undefined),
-          // Atendimento: Calculada a partir do início real, se não houver usa a criação como fallback para não zerar
+          // Atendimento: do início ao fim. Se ainda ativo, usa data atual.
+          // Importante: Se dateStarted for nulo, usamos dateCreated como fallback para evitar zerar o tempo visual
           durationSeconds: calculateSeconds(dateStarted || dateCreated, status === 'finished' ? dateEnded : undefined),
           status,
           attendantName: attName,
@@ -149,7 +153,6 @@ export const opaService = {
         };
       });
 
-      // Contador de chats ativos por atendente
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
