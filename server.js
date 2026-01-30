@@ -134,7 +134,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     startDate.setDate(startDate.getDate() - 30);
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    // Busca simplificada para evitar bugs de filtro na API do Opa
+    // Busca com limites expandidos para garantir dados de TMA
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
@@ -142,7 +142,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       }),
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": "F", "data_abertura": { "$gte": startDateStr } },
-        "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+        "options": { "limit": 5000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
       }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, { "filter": { "status": "A" }, "options": { "limit": 200 } }),
       requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })
