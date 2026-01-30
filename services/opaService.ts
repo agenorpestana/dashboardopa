@@ -4,16 +4,13 @@ import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 function calculateSeconds(startStr?: string, endStr?: string): number {
   if (!startStr) return 0;
   try {
-    const start = new Date(startStr).getTime();
+    const start = new Date(startStr.replace(' ', 'T')).getTime();
     if (isNaN(start)) return 0;
-    
-    // Usamos o tempo do servidor se disponível, ou o tempo local
-    const end = endStr ? new Date(endStr).getTime() : new Date().getTime();
+    const end = endStr ? new Date(endStr.replace(' ', 'T')).getTime() : new Date().getTime();
     if (isNaN(end)) return 0;
     
     const diff = Math.floor((end - start) / 1000);
-    // Se a diferença for negativa (drift de relógio), retornamos pelo menos 1 segundo se o ticket existir
-    return diff > 0 ? diff : 1;
+    return diff > 0 ? diff : 0;
   } catch {
     return 0;
   }
@@ -37,22 +34,6 @@ function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
 
   if (t.id_atendente) return 'in_service';
   return 'bot'; 
-}
-
-function formatPhone(phone?: any): string | null {
-  if (!phone) return null;
-  const p = String(phone).replace(/\D/g, '');
-  if (p.length < 8) return p;
-  
-  if (p.startsWith('55') && p.length >= 12) {
-    const sub = p.substring(2);
-    return sub.length === 11 ? `(${sub.substring(0,2)}) ${sub.substring(2,7)}-${sub.substring(7)}` : `(${sub.substring(0,2)}) ${sub.substring(2,6)}-${sub.substring(6)}`;
-  } else if (p.length === 11) {
-    return `(${p.substring(0,2)}) ${p.substring(2,7)}-${p.substring(7)}`;
-  } else if (p.length === 10) {
-    return `(${p.substring(0,2)}) ${p.substring(2,6)}-${p.substring(6)}`;
-  }
-  return p;
 }
 
 export const opaService = {
@@ -86,50 +67,31 @@ export const opaService = {
 
         const status = determineTicketStatus(t, deptName);
         
-        // MAPEAMENTO DE DATAS (Opa Suite é inconsistente entre versões)
-        const dateCreated = t.data_criacao || t.data_abertura || t.createdAt || t.data_cad;
-        const dateStarted = t.data_inicio || t.data_atendimento || t.dt_atendimento || t.dt_inicio; 
-        const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt || t.data_fin;
+        const dateCreated = t.data_criacao || t.data_abertura || t.createdAt;
+        const dateStarted = t.data_inicio || t.data_atendimento; 
+        const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt;
 
-        // RESOLUÇÃO DE NOME AVANÇADA
-        let nameFound = null;
-        
-        // 1. Tentar campos de nome direto
-        const prioritizedNames = [
-          t.id_cliente?.razao_social,
+        // LÓGICA DE NOME RESTAURADA E MELHORADA
+        const protocol = t.protocolo || '';
+        let clientName = '';
+
+        const namePriority = [
           t.id_cliente?.nome,
+          t.id_cliente?.razao_social,
           t.id_contato?.nome,
           t.cliente_nome,
           t.contato_nome,
-          t.nome_cliente,
           t.nome
         ];
 
-        for (const n of prioritizedNames) {
-          const val = n ? String(n).trim() : '';
-          // Se o valor NÃO for o protocolo (ex: ITL...) e NÃO for "Cliente", usamos ele.
-          if (val && 
-              val.toLowerCase() !== 'cliente' && 
-              !/^[A-Z]{2,4}\d{6,}/.test(val) && // Regex mais específica para protocolos Opa
-              val.length > 3) {
-            nameFound = val;
+        for (const n of namePriority) {
+          if (n && String(n).trim() !== '' && n !== protocol && String(n).toLowerCase() !== 'cliente') {
+            clientName = String(n).trim();
             break;
           }
         }
 
-        // 2. Se não achou nome real, tentar telefone
-        if (!nameFound) {
-          const phone = t.id_contato?.fone || t.id_cliente?.fone || t.contato_fone || t.fone;
-          const formatted = formatPhone(phone);
-          if (formatted && formatted.length > 5) {
-            nameFound = formatted;
-          }
-        }
-
-        // 3. Fallback: Se ainda estiver vazio ou for apenas o protocolo, tenta pegar o protocolo formatado
-        if (!nameFound) {
-          nameFound = t.protocolo || `Ticket ${String(t._id || t.id).slice(-6)}`;
-        }
+        if (!clientName) clientName = protocol || 'Cliente';
 
         let attName = undefined;
         if (t.id_atendente?.nome) attName = t.id_atendente.nome;
@@ -137,14 +99,13 @@ export const opaService = {
 
         return {
           id: String(t._id || t.id),
-          protocol: t.protocolo || 'N/A',
-          clientName: nameFound,
+          protocol: protocol || 'N/A',
+          clientName: clientName,
           contact: '',
-          // Espera: da criação ao início. Se ainda não iniciou, usa data atual.
+          // Espera: Da criação até o Início (ou até Agora se não iniciou)
           waitTimeSeconds: calculateSeconds(dateCreated, dateStarted || undefined),
-          // Atendimento: do início ao fim. Se ainda ativo, usa data atual.
-          // Importante: Se dateStarted for nulo, usamos dateCreated como fallback para evitar zerar o tempo visual
-          durationSeconds: calculateSeconds(dateStarted || dateCreated, status === 'finished' ? dateEnded : undefined),
+          // Atendimento: Do início até o Fim (ou até Agora se ainda ativo)
+          durationSeconds: dateStarted ? calculateSeconds(dateStarted, status === 'finished' ? dateEnded : undefined) : 0,
           status,
           attendantName: attName,
           department: deptName || 'Sem Setor',
@@ -162,7 +123,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro fatal:", e);
+      console.error("[OpaService] Erro:", e);
       return { tickets: [], attendants: [] };
     }
   }

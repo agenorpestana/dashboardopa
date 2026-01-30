@@ -13,8 +13,6 @@ interface DashboardProps {
 
 const formatTime = (seconds: number) => {
   if (!seconds || seconds <= 0) return "00:00:00";
-  // Limite de 48 horas para evitar anomalias
-  if (seconds > 172800) seconds = 172800;
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -23,25 +21,26 @@ const formatTime = (seconds: number) => {
 
 export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => {
   const stats = useMemo(() => {
-    // Pegamos a data local no formato YYYY-MM-DD
-    const today = new Date();
-    const todayStr = today.toLocaleDateString('en-CA'); // en-CA retorna YYYY-MM-DD
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
 
     const waiting = tickets.filter(t => t.status === 'waiting');
     const bot = tickets.filter(t => t.status === 'bot');
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    // Filtro de Finalizados hoje usando data local
+    // Filtro de Finalizados Hoje (ignora horas para comparação justa)
     const finishedToday = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
       if (!dStr) return false;
       const d = new Date(dStr);
-      return d.toLocaleDateString('en-CA') === todayStr;
+      const dTime = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      return dTime === today;
     });
 
+    // Filtro de Finalizados no Mês
     const finishedMonth = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
       if (!dStr) return false;
@@ -49,19 +48,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // TMA: Média dos atendimentos concluídos (considerando tickets de hoje para ser mais reativo)
-    const validDurations = finished
-      .map(t => t.durationSeconds || 0)
-      .filter(d => d > 2 && d < 28800); // 2 seg a 8 horas
+    // TMA (Tempo Médio de Atendimento)
+    const finishedWithDuration = finished.filter(t => (t.durationSeconds || 0) > 0);
+    const totalTMA = finishedWithDuration.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
+    const avgService = finishedWithDuration.length > 0 ? totalTMA / finishedWithDuration.length : 0;
 
-    const totalTMA = validDurations.reduce((acc, curr) => acc + curr, 0);
-    const avgService = validDurations.length > 0 ? totalTMA / validDurations.length : 0;
+    // TME (Tempo Médio de Espera dos que estão na fila agora)
+    const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
+    const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 
-    // TME: Tempo Médio de Espera dos que estão aguardando AGORA
-    const currentWaitingDurations = waiting.map(t => t.waitTimeSeconds).filter(d => d > 0);
-    const totalWait = currentWaitingDurations.reduce((acc, curr) => acc + curr, 0);
-    const avgWait = currentWaitingDurations.length > 0 ? totalWait / currentWaitingDurations.length : 0;
-
+    // Ranking
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
@@ -84,28 +80,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* Header Stat Cards */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
+      {/* Cards Superiores de Métricas */}
+      <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2"><Activity className="w-6 h-6 text-sky-400" /> Dashboard Operacional</h2>
-          <p className="text-slate-400 text-sm">Monitoramento de produtividade em tempo real.</p>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Activity className="w-6 h-6 text-sky-400" /> Dashboard Operacional
+          </h2>
+          <p className="text-slate-400 text-sm">Dados atualizados em tempo real.</p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
-          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800 min-w-[150px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">T.M. Espera (Fila)</p>
-            <div className="flex items-center gap-2"><Timer className="w-4 h-4 text-amber-500" /><p className="text-lg font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p></div>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">T.M. Espera</p>
+            <div className="flex items-center gap-2">
+              <Timer className="w-4 h-4 text-amber-500" />
+              <p className="text-lg font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p>
+            </div>
           </div>
-          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800 min-w-[150px]">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">T.M. Atendimento</p>
-            <div className="flex items-center gap-2"><Headset className="w-4 h-4 text-sky-500" /><p className="text-lg font-mono font-bold text-sky-400">{formatTime(stats.avgService)}</p></div>
+            <div className="flex items-center gap-2">
+              <Headset className="w-4 h-4 text-sky-500" />
+              <p className="text-lg font-mono font-bold text-sky-400">{formatTime(stats.avgService)}</p>
+            </div>
           </div>
-          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800 min-w-[150px]">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Hoje)</p>
-            <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500" /><p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p></div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
+            </div>
           </div>
-          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800 min-w-[150px]">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Mês)</p>
-            <div className="flex items-center gap-2"><CalendarCheck className="w-4 h-4 text-violet-400" /><p className="text-lg font-mono font-bold text-violet-400">{stats.finishedMonth}</p></div>
+            <div className="flex items-center gap-2">
+              <CalendarCheck className="w-4 h-4 text-violet-400" />
+              <p className="text-lg font-mono font-bold text-violet-400">{stats.finishedMonth}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -123,6 +133,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         <TicketList title="Em Atendimento" tickets={stats.inService} type="in_service" />
       </div>
 
+      {/* Seção Inferior: Gráfico e Ranking */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64">
            <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Distribuição de Volume</p>
