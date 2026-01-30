@@ -13,8 +13,8 @@ interface DashboardProps {
 
 const formatTime = (seconds: number) => {
   if (!seconds || seconds <= 0) return "00:00:00";
-  // Limite de 100 horas para evitar bugs visuais de TMA
-  if (seconds > 360000) seconds = 360000;
+  // Limite de 24 horas para evitar bugs visuais extremos
+  if (seconds > 86400) seconds = 86400;
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -24,7 +24,7 @@ const formatTime = (seconds: number) => {
 export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => {
   const stats = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toLocaleDateString();
+    const todayISO = now.toISOString().split('T')[0];
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
@@ -33,11 +33,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    // Filtro Robusto de Finalizados hoje
+    // Filtro de Finalizados hoje (Comparação de String ISO YYYY-MM-DD)
     const finishedToday = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
       if (!dStr) return false;
-      return new Date(dStr).toLocaleDateString() === todayStr;
+      return dStr.startsWith(todayISO);
     });
 
     const finishedMonth = finished.filter(t => {
@@ -47,15 +47,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // TMA: Média dos tickets finalizados (ignora outliers acima de 24h)
+    // TMA: Média dos atendimentos concluídos (ignora tempos irreais > 12h)
     const validServiceDurations = finished
       .map(t => t.durationSeconds || 0)
-      .filter(d => d > 0 && d < 86400);
+      .filter(d => d > 5 && d < 43200);
 
     const totalTMA = validServiceDurations.reduce((acc, curr) => acc + curr, 0);
     const avgService = validServiceDurations.length > 0 ? totalTMA / validServiceDurations.length : 0;
 
-    // TME: Tempo Médio de Espera (tickets esperando agora)
+    // TME: Tempo Médio de Espera (tickets esperando agora na fila)
     const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 

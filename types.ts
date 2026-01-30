@@ -1,3 +1,4 @@
+
 export type TicketStatus = 'waiting' | 'in_service' | 'finished' | 'bot';
 
 export interface Ticket {
@@ -10,6 +11,9 @@ export interface Ticket {
   status: TicketStatus;
   attendantName?: string;
   department?: string;
+  // Added optional date fields to store creation and completion times for dashboard analytics
+  createdAt?: string;
+  closedAt?: string;
 }
 
 export interface Attendant {

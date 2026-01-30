@@ -134,7 +134,6 @@ app.get('/api/dashboard-data', async (req, res) => {
     startDate.setDate(startDate.getDate() - 30);
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    // Busca com limites expandidos para garantir dados de TMA
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
