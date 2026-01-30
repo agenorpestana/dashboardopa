@@ -1,9 +1,6 @@
 
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
-/**
- * Converte strings de data da API (ISO 8601: 2023-12-15T19:11:50.657Z) para timestamp.
- */
 function toTimestamp(dateVal: any): number {
   if (!dateVal) return 0;
   const ts = Date.parse(String(dateVal));
@@ -18,30 +15,14 @@ function calculateDuration(start: any, end?: any): number {
   return diff > 0 ? diff : 0;
 }
 
-/**
- * Mapeamento de Status baseado na Documentação:
- * EA = Em Atendimento
- * F = Finalizado
- * AG = Aguardando (Padrão Opa)
- * PS = Bot / Triagem
- */
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
-  
   if (s === 'F') return 'finished';
   if (s === 'EA') return 'in_service';
   if (s === 'AG') return 'waiting';
   if (s === 'PS' || s === 'BOT') return 'bot';
-
-  // Fallback inteligente:
-  // Se não é finalizado e tem atendente com nome, está em serviço
-  if (t.id_atendente && typeof t.id_atendente === 'object' && t.id_atendente.nome) {
-    return 'in_service';
-  }
-
-  // Se tem setor mas não tem atendente, está na fila de espera
+  if (t.id_atendente && typeof t.id_atendente === 'object' && t.id_atendente.nome) return 'in_service';
   if (t.setor) return 'waiting';
-
   return 'bot'; 
 }
 
@@ -54,11 +35,22 @@ export const opaService = {
       if (!response.ok) return { tickets: [], attendants: [] };
       const result = await response.json();
       
-      // A API do Opa retorna os dados dentro de uma propriedade "data"
       const rawTickets = result.tickets || [];
       const rawAttendants = result.attendants || [];
+      const rawClients = result.clients || [];
+      const rawContacts = result.contacts || [];
 
-      // Mapeamento de Atendentes
+      // Criar Dicionários de Pesquisa para cruzamento de nomes
+      const clientLookup = new Map<string, string>();
+      rawClients.forEach((c: any) => {
+        if (c._id && c.nome) clientLookup.set(String(c._id), String(c.nome));
+      });
+
+      const contactLookup = new Map<string, string>();
+      rawContacts.forEach((c: any) => {
+        if (c._id && c.nome) contactLookup.set(String(c._id), String(c.nome));
+      });
+
       const attendants: Attendant[] = rawAttendants.map((a: any) => ({
         id: String(a._id || a.id),
         name: a.nome || 'Agente',
@@ -70,24 +62,34 @@ export const opaService = {
         const protocol = (t.protocolo || '').trim();
         const status = determineTicketStatus(t);
 
-        // Resolução do Nome do Cliente conforme Documentação (id_cliente.nome)
+        // Lógica de Cruzamento de Nome de Cliente
         let clientName = '';
+        
+        // 1. Tentar pegar do objeto populado id_cliente
         if (t.id_cliente && typeof t.id_cliente === 'object' && t.id_cliente.nome) {
           clientName = String(t.id_cliente.nome).trim();
-        } else if (t.id_contato && typeof t.id_contato === 'object' && t.id_contato.nome) {
+        } 
+        // 2. Tentar lookup pelo ID da string id_cliente
+        else if (t.id_cliente && typeof t.id_cliente === 'string' && clientLookup.has(t.id_cliente)) {
+          clientName = clientLookup.get(t.id_cliente)!;
+        }
+        // 3. Tentar pegar do objeto populado id_contato
+        else if (t.id_contato && typeof t.id_contato === 'object' && t.id_contato.nome) {
           clientName = String(t.id_contato.nome).trim();
         }
-
-        // Se o nome extraído for igual ao protocolo ou padrão ITL/OPA, invalidamos
-        const isProtocol = (str: string) => /^(ITL|OPA)\d+/i.test(str) || /^\d{10,}$/.test(str);
-        if (!clientName || isProtocol(clientName)) {
-           clientName = protocol || 'Cliente';
+        // 4. Tentar lookup pelo ID da string id_contato
+        else if (t.id_contato && typeof t.id_contato === 'string' && contactLookup.has(t.id_contato)) {
+          clientName = contactLookup.get(t.id_contato)!;
         }
 
-        // Resolução do Atendente
-        const attName = t.id_atendente?.nome || undefined;
+        // Validação final: Se o nome parece um protocolo ou está vazio, usa o protocolo da API
+        const isInvalidName = (str: string) => !str || /^(ITL|OPA)\d+/i.test(str) || /^\d{10,}$/.test(str) || str.toLowerCase() === 'cliente';
+        
+        if (isInvalidName(clientName)) {
+           clientName = protocol || 'Cliente Anonimo';
+        }
 
-        // Datas conforme documentação: 'date' para abertura, 'fim' para fechamento
+        const attName = t.id_atendente?.nome || undefined;
         const dateCreated = t.date; 
         const dateFinished = t.fim;
 
@@ -96,12 +98,10 @@ export const opaService = {
           protocol: protocol,
           clientName: clientName,
           contact: '',
-          // Espera: Criado até agora (se waiting) ou até o início (se in_service/finished)
-          waitTimeSeconds: status === 'waiting' 
-            ? calculateDuration(dateCreated) 
-            : 0, // No dashboard, focamos na espera atual
-          // Duração: Do início (date) até agora ou até o fim
-          durationSeconds: status === 'in_service' || status === 'finished'
+          // Espera: Criado até agora (se waiting)
+          waitTimeSeconds: status === 'waiting' ? calculateDuration(dateCreated) : 0,
+          // Atendimento: Criado até o Fim (aproximação conforme doc)
+          durationSeconds: (status === 'in_service' || status === 'finished')
             ? calculateDuration(dateCreated, dateFinished)
             : 0,
           status,
@@ -112,7 +112,6 @@ export const opaService = {
         };
       });
 
-      // Contagem de chats ativos por atendente
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
@@ -122,7 +121,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro de processamento:", e);
+      console.error("[OpaService] Erro:", e);
       return { tickets: [], attendants: [] };
     }
   }

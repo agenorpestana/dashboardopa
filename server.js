@@ -131,45 +131,50 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = config.api_url.replace(/\/$/, '');
     const token = config.api_token;
 
-    // Conforme documentação, usamos 'dataInicialAbertura' para filtrar o histórico
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - 7);
     const dateLimitStr = dateLimit.toISOString().split('T')[0];
 
-    // Populate Fields conforme documentação exemplo: "id_cliente", "id_atendente", "id_motivo_atendimento"
+    // Populate Fields
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
 
-    const [activeRes, historyRes, uRes] = await Promise.all([
-      // Atendimentos Ativos (Status diferente de F)
+    const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
+      // Atendimentos Ativos
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
         "options": { "limit": 500, "populate": populate }
       }),
-      // Histórico Recente (Status igual a F)
+      // Histórico Recente
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": "F", "dataInicialAbertura": dateLimitStr },
         "options": { "limit": 500, "populate": populate }
       }),
-      // Usuários Ativos
+      // Usuários
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
         "filter": { "status": "A" },
         "options": { "limit": 100 }
+      }),
+      // Clientes (Para cruzamento de nome)
+      requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, {
+        "options": { "limit": 1000, "sort": "-_id" }
+      }),
+      // Contatos (Para cruzamento de nome)
+      requestWithBody(`${baseUrl}/api/v1/contato`, 'GET', token, {
+        "options": { "limit": 1000, "sort": "-_id" }
       })
     ]);
 
-    // O Opa Suite retorna os dados em .data ou .data.data dependendo da versão
     const getList = (res) => {
       if (!res.ok) return [];
       return res.data.data || res.data || [];
     };
 
-    const tickets = [...getList(activeRes), ...getList(historyRes)];
-    const attendants = getList(uRes);
-
     res.json({
       success: true,
-      tickets,
-      attendants
+      tickets: [...getList(activeRes), ...getList(historyRes)],
+      attendants: getList(uRes),
+      clients: getList(clientRes),
+      contacts: getList(contactRes)
     });
 
   } catch (error) { 
