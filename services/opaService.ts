@@ -21,7 +21,8 @@ function determineTicketStatus(t: any): TicketStatus {
   if (s === 'EA') return 'in_service';
   if (s === 'AG') return 'waiting';
   if (s === 'PS' || s === 'BOT') return 'bot';
-  if (t.id_atendente && typeof t.id_atendente === 'object' && t.id_atendente.nome) return 'in_service';
+  // Se houver atendente vinculado, consideramos em serviço
+  if (t.id_atendente) return 'in_service';
   if (t.setor) return 'waiting';
   return 'bot'; 
 }
@@ -40,67 +41,98 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // Criar Dicionários de Pesquisa para cruzamento de nomes
-      const clientLookup = new Map<string, string>();
+      // Dicionários de Nomes e Telefones
+      const clientNameMap = new Map<string, string>();
+      const clientPhoneMap = new Map<string, string>();
       rawClients.forEach((c: any) => {
-        if (c._id && c.nome) clientLookup.set(String(c._id), String(c.nome));
+        const id = String(c._id);
+        if (c.nome) clientNameMap.set(id, String(c.nome));
+        if (c.fone) clientPhoneMap.set(id, String(c.fone));
+        else if (c.cpf_cnpj) clientPhoneMap.set(id, String(c.cpf_cnpj));
       });
 
-      const contactLookup = new Map<string, string>();
+      const contactNameMap = new Map<string, string>();
+      const contactPhoneMap = new Map<string, string>();
       rawContacts.forEach((c: any) => {
-        if (c._id && c.nome) contactLookup.set(String(c._id), String(c.nome));
+        const id = String(c._id);
+        if (c.nome) contactNameMap.set(id, String(c.nome));
+        
+        // Tenta extrair primeiro telefone da lista de fones
+        if (c.fones && Array.isArray(c.fones) && c.fones.length > 0) {
+          contactPhoneMap.set(id, String(c.fones[0].numero || ''));
+        } else if (c.email_principal) {
+          contactPhoneMap.set(id, String(c.email_principal));
+        }
       });
 
-      const attendants: Attendant[] = rawAttendants.map((a: any) => ({
-        id: String(a._id || a.id),
-        name: a.nome || 'Agente',
-        status: a.status === 'A' ? 'online' : 'offline',
-        activeChats: 0
-      }));
+      // Mapeamento de Atendentes (Lookup Map para nomes)
+      const attendantNameMap = new Map<string, string>();
+      const attendants: Attendant[] = rawAttendants.map((a: any) => {
+        const id = String(a._id || a.id);
+        const name = a.nome || 'Agente';
+        attendantNameMap.set(id, name);
+        return {
+          id,
+          name,
+          status: a.status === 'A' ? 'online' : 'offline',
+          activeChats: 0
+        };
+      });
 
       const tickets: Ticket[] = rawTickets.map((t: any) => {
         const protocol = (t.protocolo || '').trim();
         const status = determineTicketStatus(t);
 
-        // Lógica de Cruzamento de Nome de Cliente
-        let clientName = '';
+        // 1. Tentar Nome Real
+        let resolvedName = '';
+        let resolvedPhone = '';
+
+        const clientId = typeof t.id_cliente === 'object' ? t.id_cliente?._id : t.id_cliente;
+        const contactId = typeof t.id_contato === 'object' ? t.id_contato?._id : t.id_contato;
+
+        // Prioridade 1: Objeto populado
+        if (t.id_cliente?.nome) resolvedName = t.id_cliente.nome;
+        else if (t.id_contato?.nome) resolvedName = t.id_contato.nome;
         
-        // 1. Tentar pegar do objeto populado id_cliente
-        if (t.id_cliente && typeof t.id_cliente === 'object' && t.id_cliente.nome) {
-          clientName = String(t.id_cliente.nome).trim();
-        } 
-        // 2. Tentar lookup pelo ID da string id_cliente
-        else if (t.id_cliente && typeof t.id_cliente === 'string' && clientLookup.has(t.id_cliente)) {
-          clientName = clientLookup.get(t.id_cliente)!;
-        }
-        // 3. Tentar pegar do objeto populado id_contato
-        else if (t.id_contato && typeof t.id_contato === 'object' && t.id_contato.nome) {
-          clientName = String(t.id_contato.nome).trim();
-        }
-        // 4. Tentar lookup pelo ID da string id_contato
-        else if (t.id_contato && typeof t.id_contato === 'string' && contactLookup.has(t.id_contato)) {
-          clientName = contactLookup.get(t.id_contato)!;
+        // Prioridade 2: Lookups por ID
+        if (!resolvedName && clientId) resolvedName = clientNameMap.get(String(clientId)) || '';
+        if (!resolvedName && contactId) resolvedName = contactNameMap.get(String(contactId)) || '';
+
+        // Prioridade 3: Lookups de Telefone (Caso não tenha nome)
+        if (clientId) resolvedPhone = clientPhoneMap.get(String(clientId)) || '';
+        if (!resolvedPhone && contactId) resolvedPhone = contactPhoneMap.get(String(contactId)) || '';
+        if (!resolvedPhone && t.id_contato?.fones?.[0]?.numero) resolvedPhone = t.id_contato.fones[0].numero;
+
+        // Validação de "Nome que é Protocolo"
+        const isProtocol = (str: string) => !str || /^(ITL|OPA)\d+/i.test(str) || /^\d{10,}$/.test(str) || str.toLowerCase() === 'cliente';
+
+        let finalDisplayName = resolvedName;
+        
+        // Se o nome for inválido ou protocolo, tenta o telefone
+        if (isProtocol(finalDisplayName)) {
+          finalDisplayName = resolvedPhone || protocol || 'Cliente Anonimo';
         }
 
-        // Validação final: Se o nome parece um protocolo ou está vazio, usa o protocolo da API
-        const isInvalidName = (str: string) => !str || /^(ITL|OPA)\d+/i.test(str) || /^\d{10,}$/.test(str) || str.toLowerCase() === 'cliente';
-        
-        if (isInvalidName(clientName)) {
-           clientName = protocol || 'Cliente Anonimo';
+        // --- CORREÇÃO DO NOME DO ATENDENTE ---
+        let attName = undefined;
+        if (t.id_atendente) {
+          if (typeof t.id_atendente === 'object' && t.id_atendente.nome) {
+            attName = t.id_atendente.nome;
+          } else {
+            // Se vier apenas o ID (string), busca no mapa de atendentes
+            attName = attendantNameMap.get(String(t.id_atendente));
+          }
         }
 
-        const attName = t.id_atendente?.nome || undefined;
         const dateCreated = t.date; 
         const dateFinished = t.fim;
 
         return {
           id: String(t._id || t.id),
           protocol: protocol,
-          clientName: clientName,
-          contact: '',
-          // Espera: Criado até agora (se waiting)
+          clientName: String(finalDisplayName).trim(),
+          contact: resolvedPhone,
           waitTimeSeconds: status === 'waiting' ? calculateDuration(dateCreated) : 0,
-          // Atendimento: Criado até o Fim (aproximação conforme doc)
           durationSeconds: (status === 'in_service' || status === 'finished')
             ? calculateDuration(dateCreated, dateFinished)
             : 0,
@@ -112,6 +144,7 @@ export const opaService = {
         };
       });
 
+      // Contagem de chats ativos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
