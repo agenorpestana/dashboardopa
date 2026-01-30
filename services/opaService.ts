@@ -46,6 +46,23 @@ function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
   return 'bot'; 
 }
 
+// Formata telefone (Ex: 5547999999999 -> (47) 99999-9999)
+function formatPhone(phone?: any): string | null {
+  if (!phone) return null;
+  const p = String(phone).replace(/\D/g, '');
+  if (p.length < 10) return p;
+  
+  if (p.startsWith('55')) {
+    const sub = p.substring(2);
+    if (sub.length === 11) {
+      return `(${sub.substring(0,2)}) ${sub.substring(2,7)}-${sub.substring(7)}`;
+    } else if (sub.length === 10) {
+      return `(${sub.substring(0,2)}) ${sub.substring(2,6)}-${sub.substring(6)}`;
+    }
+  }
+  return p;
+}
+
 export const opaService = {
   fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[] }> => {
     if (!config.apiUrl || !config.apiToken) return { tickets: [], attendants: [] };
@@ -81,11 +98,25 @@ export const opaService = {
         const dateStart = t.data_inicio || t.data_criacao || t.date;
         const dateEnd = t.data_fechamento || t.updated_at;
 
-        // Resolução do nome do cliente
-        let clientName = 'Cliente';
+        // RESOLUÇÃO MELHORADA DO NOME DO CLIENTE / TELEFONE
+        let clientName = null;
+        
+        // 1. Tentar Nome Formal
         if (t.id_cliente?.nome) clientName = t.id_cliente.nome;
         else if (t.nome_cliente) clientName = t.nome_cliente;
         else if (t.cliente?.nome) clientName = t.cliente.nome;
+        else if (t.contato_nome) clientName = t.contato_nome;
+        else if (t.id_contato?.nome) clientName = t.id_contato.nome;
+        
+        // 2. Tentar Telefone se o nome for genérico ou nulo
+        if (!clientName || clientName.toLowerCase() === 'cliente') {
+           const phoneRaw = t.contato_fone || t.fone || t.telefone || t.id_contato?.fone || t.id_cliente?.fone;
+           const formatted = formatPhone(phoneRaw);
+           if (formatted) clientName = formatted;
+        }
+
+        // 3. Fallback final
+        if (!clientName) clientName = 'Cliente';
 
         // Resolução do nome do atendente
         let attName = undefined;

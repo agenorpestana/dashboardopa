@@ -137,13 +137,13 @@ app.get('/api/dashboard-data', async (req, res) => {
     // BUSCA 1: Tickets ATIVOS (Garante que nunca sumam)
     const activePayload = {
       "filter": { "status": { "$ne": "F" } },
-      "options": { "limit": 500, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor"] }
+      "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
     };
 
-    // BUSCA 2: Tickets FINALIZADOS (Para métricas e ranking)
+    // BUSCA 2: Tickets FINALIZADOS (Priorizando os mais recentes com sort -_id e limite maior)
     const historyPayload = {
-      "filter": { "status": "F", "dataInicialAbertura": startDateStr },
-      "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor"] }
+      "filter": { "status": "F", "dataInicialAbertura": { "$gte": startDateStr } },
+      "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
     };
 
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
@@ -156,7 +156,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     const activeTickets = activeRes.ok ? (activeRes.data.data || activeRes.data) : [];
     const historyTickets = historyRes.ok ? (historyRes.data.data || historyRes.data) : [];
 
-    // Combinar as duas listas
+    // Combinar as duas listas garantindo que sejam arrays
     const allTickets = Array.isArray(activeTickets) ? [...activeTickets] : [];
     if (Array.isArray(historyTickets)) {
        allTickets.push(...historyTickets);
