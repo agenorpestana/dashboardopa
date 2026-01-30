@@ -52,7 +52,6 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badge}`}>{tickets.length}</span>
       </div>
       
-      {/* Altura fixa de 320px para caber aprox 6-7 linhas */}
       <div className="overflow-y-auto h-[320px] custom-scrollbar bg-slate-900/20">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -73,7 +72,7 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
                     <div className="min-w-0">
                       <p className="font-medium text-xs text-slate-200 truncate pr-1">{t.clientName}</p>
                       <p className="text-[9px] text-slate-500 truncate">
-                        {type === 'in_service' ? (t.attendantName || 'Atendente') : (t.department || 'Geral')}
+                        {type === 'in_service' ? (t.attendantName || 'Em atendimento') : (t.department || 'Sem Setor')}
                       </p>
                     </div>
                   </div>
@@ -89,7 +88,7 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
             {tickets.length === 0 && (
               <tr>
                 <td colSpan={3} className="py-20 text-center text-slate-500 text-xs italic">
-                  Nenhum atendimento ativo
+                  Nenhum atendimento ativo nesta categoria
                 </td>
               </tr>
             )}

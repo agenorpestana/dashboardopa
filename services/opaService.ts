@@ -17,20 +17,33 @@ function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
     return 'finished';
   }
 
-  // 2. EM ATENDIMENTO: Se tem atendente atribuído E não está finalizado
-  if (t.id_atendente || ['EA', 'EM ATENDIMENTO', '2'].includes(s)) {
+  // 2. EM ATENDIMENTO (Regra: EA = Em atendimento)
+  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) {
     return 'in_service';
   }
 
-  // 3. BOT ou ESPERA:
-  if (['AG', 'AGUARDANDO', 'BOT', 'PS', 'E', 'EE', 'EM ESPERA', '1', 'T'].includes(s) || s === '') {
-     if (s === 'PS') return 'bot';
-     // Se tem departamento/setor, está na fila humana (Espera)
-     const hasDept = departmentName && departmentName !== 'Geral' && departmentName !== 'Sem Setor';
+  // 3. PESQUISA (Regra: PS = Com o bot)
+  if (s === 'PS') {
+    return 'bot';
+  }
+
+  // 4. AGUARDANDO / EM ESPERA (Regra: AG = Bot se sem setor, Espera se com setor)
+  if (['AG', 'AGUARDANDO', 'BOT', 'E', 'EE', 'EM ESPERA', '1', 'T', ''].includes(s)) {
+     // Consideramos que tem setor se o nome do departamento não for genérico ou vazio
+     const hasDept = departmentName && 
+                    departmentName !== 'Geral' && 
+                    departmentName !== 'Sem Setor' && 
+                    departmentName.trim() !== '';
+     
      return hasDept ? 'waiting' : 'bot';
   }
 
-  return 'finished'; 
+  // Fallback de segurança: Se tem atendente e não caiu nas regras acima, provavelmente está em atendimento
+  if (t.id_atendente) {
+    return 'in_service';
+  }
+
+  return 'bot'; 
 }
 
 export const opaService = {
@@ -88,7 +101,7 @@ export const opaService = {
           durationSeconds: calculateSeconds(dateStart),
           status,
           attendantName: attName,
-          department: deptName || 'Geral',
+          department: deptName || 'Sem Setor',
           createdAt: dateStart,
           closedAt: dateEnd
         };
