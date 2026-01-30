@@ -134,28 +134,16 @@ app.get('/api/dashboard-data', async (req, res) => {
     startDate.setDate(startDate.getDate() - 30);
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    // BUSCA 1: Tickets ATIVOS
-    const activePayload = {
-      "filter": { "status": { "$ne": "F" } },
-      "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
-    };
-
-    // BUSCA 2: Tickets FINALIZADOS (Tenta múltiplos campos de data comuns na API do Opa)
-    const historyPayload = {
-      "filter": { 
-        "status": "F",
-        "$or": [
-          { "data_abertura": { "$gte": startDateStr } },
-          { "data_criacao": { "$gte": startDateStr } },
-          { "data_inicio": { "$gte": startDateStr } }
-        ]
-      },
-      "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
-    };
-
+    // Busca simplificada para evitar bugs de filtro na API do Opa
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, activePayload),
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, historyPayload),
+      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
+        "filter": { "status": { "$ne": "F" } },
+        "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+      }),
+      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
+        "filter": { "status": "F", "data_abertura": { "$gte": startDateStr } },
+        "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+      }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, { "filter": { "status": "A" }, "options": { "limit": 200 } }),
       requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })
     ]);

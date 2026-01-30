@@ -75,16 +75,20 @@ export const opaService = {
         else if (deptMap.has(String(rawDept))) deptName = deptMap.get(String(rawDept));
 
         const status = determineTicketStatus(t, deptName);
-        const dateStart = t.data_inicio || t.data_criacao || t.data_abertura || t.date;
-        const dateEnd = t.data_fechamento || t.data_fim || t.updated_at;
+        
+        // CORREÇÃO DAS DATAS:
+        const dateCreated = t.data_criacao || t.data_abertura || t.createdAt;
+        const dateStarted = t.data_inicio || t.data_abertura; // Quando o atendente pegou
+        const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt;
 
-        // RESOLUÇÃO DE NOME (Foco em campos de Tickets ativos do Opa)
+        // RESOLUÇÃO DE NOME MELHORADA
         let nameFound = null;
         const possibleNames = [
           t.nome_cliente,
           t.id_cliente_nome,
           t.id_cliente?.nome,
           t.id_cliente?.name,
+          t.id_cliente?.razao_social,
           t.cliente?.nome,
           t.contato_nome,
           t.id_contato?.nome,
@@ -92,13 +96,14 @@ export const opaService = {
         ];
 
         for (const n of possibleNames) {
-          if (n && String(n).trim() !== '' && String(n).toLowerCase() !== 'cliente') {
+          if (n && String(n).trim() !== '' && String(n).toLowerCase().trim() !== 'cliente') {
             nameFound = String(n).trim();
             break;
           }
         }
 
-        if (!nameFound) {
+        // Se o nome ainda for nulo ou "Cliente", tenta o telefone
+        if (!nameFound || nameFound.toLowerCase() === 'cliente') {
           const possiblePhones = [
             t.contato_fone,
             t.fone,
@@ -115,7 +120,10 @@ export const opaService = {
           }
         }
 
-        if (!nameFound) nameFound = 'Cliente #' + String(t._id || t.id).slice(-4);
+        // Se nada mesmo, usa o protocolo ou um pedaço do ID
+        if (!nameFound || nameFound.toLowerCase() === 'cliente') {
+           nameFound = t.protocolo ? `Prot. ${t.protocolo}` : `ID ${String(t._id || t.id).slice(-6)}`;
+        }
 
         let attName = undefined;
         if (t.id_atendente?.nome) attName = t.id_atendente.nome;
@@ -126,13 +134,15 @@ export const opaService = {
           protocol: t.protocolo || 'N/A',
           clientName: nameFound,
           contact: '',
-          waitTimeSeconds: calculateSeconds(dateStart),
-          durationSeconds: calculateSeconds(dateStart, status === 'finished' ? dateEnd : undefined),
+          // Espera: Da criação até o início do atendimento (ou agora se ainda esperando)
+          waitTimeSeconds: calculateSeconds(dateCreated, dateStarted || undefined),
+          // Duração: Do início do atendimento até o fim (ou agora se ativo)
+          durationSeconds: calculateSeconds(dateStarted || dateCreated, status === 'finished' ? dateEnded : undefined),
           status,
           attendantName: attName,
           department: deptName || 'Sem Setor',
-          createdAt: dateStart,
-          closedAt: dateEnd
+          createdAt: dateCreated,
+          closedAt: dateEnded
         };
       });
 
