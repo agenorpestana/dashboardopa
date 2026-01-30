@@ -132,7 +132,6 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
-    // Usamos o formato YYYY-MM-DD que é o padrão da API do Opa
     const startDateStr = startDate.toISOString().split('T')[0];
 
     // BUSCA 1: Tickets ATIVOS
@@ -141,14 +140,17 @@ app.get('/api/dashboard-data', async (req, res) => {
       "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
     };
 
-    // BUSCA 2: Tickets FINALIZADOS
-    // Alterado o filtro para ser mais abrangente (data_inicio ou data_criacao)
+    // BUSCA 2: Tickets FINALIZADOS (Tenta múltiplos campos de data comuns na API do Opa)
     const historyPayload = {
       "filter": { 
-        "status": "F", 
-        "data_inicio": { "$gte": startDateStr } 
+        "status": "F",
+        "$or": [
+          { "data_abertura": { "$gte": startDateStr } },
+          { "data_criacao": { "$gte": startDateStr } },
+          { "data_inicio": { "$gte": startDateStr } }
+        ]
       },
-      "options": { "limit": 3000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+      "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
     };
 
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
@@ -161,15 +163,12 @@ app.get('/api/dashboard-data', async (req, res) => {
     let activeTickets = activeRes.ok ? (activeRes.data.data || activeRes.data) : [];
     let historyTickets = historyRes.ok ? (historyRes.data.data || historyRes.data) : [];
 
-    // Garantir que são arrays antes de unir
     if (!Array.isArray(activeTickets)) activeTickets = [];
     if (!Array.isArray(historyTickets)) historyTickets = [];
 
-    const allTickets = [...activeTickets, ...historyTickets];
-
     res.json({
       success: true,
-      tickets: allTickets,
+      tickets: [...activeTickets, ...historyTickets],
       attendants: uRes.ok ? (uRes.data.data || uRes.data) : [],
       departments: dRes.ok ? (dRes.data.data || dRes.data) : []
     });

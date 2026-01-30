@@ -13,6 +13,8 @@ interface DashboardProps {
 
 const formatTime = (seconds: number) => {
   if (!seconds || seconds < 0) return "00:00:00";
+  // Evita exibir durações absurdas (mais de 1000 horas)
+  if (seconds > 3600000) seconds = 3600000; 
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -31,10 +33,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    // Tickets finalizados hoje e no mês
     const finishedToday = finished.filter(t => {
-      const d = t.closedAt ? new Date(t.closedAt) : (t.createdAt ? new Date(t.createdAt) : null);
-      return d && d.toISOString().split('T')[0] === todayStr;
+      const dStr = t.closedAt || t.createdAt;
+      return dStr && dStr.startsWith(todayStr);
     });
 
     const finishedMonth = finished.filter(t => {
@@ -42,15 +43,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d && d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // TMA: Média dos tickets finalizados (mais preciso)
-    const totalTMA = finished.slice(0, 50).reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
-    const avgService = finished.length > 0 ? totalTMA / Math.min(finished.length, 50) : 0;
+    // TMA: Média dos tickets finalizados (Ignora durações maiores que 24h para não sujar a média)
+    const validDurations = finished
+      .map(t => t.durationSeconds || 0)
+      .filter(d => d > 10 && d < 86400); // Entre 10s e 24h
+
+    const totalTMA = validDurations.reduce((acc, curr) => acc + curr, 0);
+    const avgService = validDurations.length > 0 ? totalTMA / validDurations.length : 0;
 
     // TME: Tempo Médio de Espera (fila atual)
     const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 
-    // Ranking Top 5 (Mês corrente)
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
@@ -73,7 +77,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* KPIs de Performance */}
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2"><Activity className="w-6 h-6 text-sky-400" /> Dashboard Operacional</h2>
@@ -99,7 +102,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         </div>
       </div>
 
-      {/* Cards de Status */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard title="Em Espera" value={stats.waiting.length} icon={<Clock className="text-amber-500" />} colorClass="text-amber-500" />
         <StatCard title="Com o Bot" value={stats.bot.length} icon={<Bot className="text-violet-500" />} colorClass="text-violet-500" />
@@ -107,14 +109,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         <StatCard title="Atendentes" value={stats.onlineCount} icon={<Users className="text-emerald-500" />} colorClass="text-emerald-500" />
       </div>
 
-      {/* Listas de Atendimento (Tamanho Fixo com Scroll) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <TicketList title="Em Espera" tickets={stats.waiting} type="waiting" />
         <TicketList title="Com o Bot" tickets={stats.bot} type="bot" />
         <TicketList title="Em Atendimento" tickets={stats.inService} type="in_service" />
       </div>
 
-      {/* Gráfico e Ranking */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64">
            <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Distribuição de Volume</p>

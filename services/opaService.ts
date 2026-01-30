@@ -1,11 +1,12 @@
 
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
-function calculateSeconds(dateStr?: string): number {
-  if (!dateStr) return 0;
-  const start = new Date(dateStr).getTime();
-  const now = new Date().getTime();
-  return Math.max(0, Math.floor((now - start) / 1000));
+function calculateSeconds(startStr?: string, endStr?: string): number {
+  if (!startStr) return 0;
+  const start = new Date(startStr).getTime();
+  const end = endStr ? new Date(endStr).getTime() : new Date().getTime();
+  const diff = Math.floor((end - start) / 1000);
+  return Math.max(0, diff);
 }
 
 function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
@@ -33,17 +34,15 @@ function formatPhone(phone?: any): string | null {
   const p = String(phone).replace(/\D/g, '');
   if (p.length < 8) return p;
   
-  let result = p;
   if (p.startsWith('55') && p.length >= 12) {
     const sub = p.substring(2);
-    if (sub.length === 11) result = `(${sub.substring(0,2)}) ${sub.substring(2,7)}-${sub.substring(7)}`;
-    else if (sub.length === 10) result = `(${sub.substring(0,2)}) ${sub.substring(2,6)}-${sub.substring(6)}`;
+    return sub.length === 11 ? `(${sub.substring(0,2)}) ${sub.substring(2,7)}-${sub.substring(7)}` : `(${sub.substring(0,2)}) ${sub.substring(2,6)}-${sub.substring(6)}`;
   } else if (p.length === 11) {
-    result = `(${p.substring(0,2)}) ${p.substring(2,7)}-${p.substring(7)}`;
+    return `(${p.substring(0,2)}) ${p.substring(2,7)}-${p.substring(7)}`;
   } else if (p.length === 10) {
-    result = `(${p.substring(0,2)}) ${p.substring(2,6)}-${p.substring(6)}`;
+    return `(${p.substring(0,2)}) ${p.substring(2,6)}-${p.substring(6)}`;
   }
-  return result;
+  return p;
 }
 
 export const opaService = {
@@ -76,22 +75,19 @@ export const opaService = {
         else if (deptMap.has(String(rawDept))) deptName = deptMap.get(String(rawDept));
 
         const status = determineTicketStatus(t, deptName);
-        const dateStart = t.data_inicio || t.data_criacao || t.date;
-        const dateEnd = t.data_fechamento || t.updated_at;
+        const dateStart = t.data_inicio || t.data_criacao || t.data_abertura || t.date;
+        const dateEnd = t.data_fechamento || t.data_fim || t.updated_at;
 
-        // RESOLUÇÃO AGRESSIVA DE NOME / TELEFONE
+        // RESOLUÇÃO DE NOME (Foco em campos de Tickets ativos do Opa)
         let nameFound = null;
-
-        // 1. Verificar em todas as propriedades de NOME possíveis
         const possibleNames = [
+          t.nome_cliente,
+          t.id_cliente_nome,
           t.id_cliente?.nome,
           t.id_cliente?.name,
-          t.id_cliente?.razao_social,
-          t.nome_cliente,
           t.cliente?.nome,
           t.contato_nome,
           t.id_contato?.nome,
-          t.id_contato?.name,
           t.nome
         ];
 
@@ -102,16 +98,13 @@ export const opaService = {
           }
         }
 
-        // 2. Se não achou nome, buscar Telefone em todas as fontes
         if (!nameFound) {
           const possiblePhones = [
             t.contato_fone,
             t.fone,
             t.telefone,
             t.id_contato?.fone,
-            t.id_contato?.telefone,
-            t.id_cliente?.fone,
-            t.id_cliente?.telefone
+            t.id_cliente?.fone
           ];
           for (const p of possiblePhones) {
             const formatted = formatPhone(p);
@@ -122,8 +115,7 @@ export const opaService = {
           }
         }
 
-        // 3. Fallback se nada foi encontrado
-        if (!nameFound) nameFound = 'Cliente';
+        if (!nameFound) nameFound = 'Cliente #' + String(t._id || t.id).slice(-4);
 
         let attName = undefined;
         if (t.id_atendente?.nome) attName = t.id_atendente.nome;
@@ -135,7 +127,7 @@ export const opaService = {
           clientName: nameFound,
           contact: '',
           waitTimeSeconds: calculateSeconds(dateStart),
-          durationSeconds: calculateSeconds(dateStart),
+          durationSeconds: calculateSeconds(dateStart, status === 'finished' ? dateEnd : undefined),
           status,
           attendantName: attName,
           department: deptName || 'Sem Setor',
