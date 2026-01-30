@@ -141,7 +141,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       }),
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": "F", "data_abertura": { "$gte": startDateStr } },
-        "options": { "limit": 5000, "sort": "-data_fechamento", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+        "options": { "limit": 2000, "sort": "-data_fechamento", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
       }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, { "filter": { "status": "A" }, "options": { "limit": 200 } }),
       requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })

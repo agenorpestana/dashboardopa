@@ -22,8 +22,7 @@ const formatTime = (seconds: number) => {
 export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => {
   const stats = useMemo(() => {
     const now = new Date();
-    // Normalização para comparação apenas de data (sem hora)
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayISO = now.toISOString().split('T')[0]; // "YYYY-MM-DD"
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
@@ -32,34 +31,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    // Filtro de Finalizados Hoje (Robustez com normalização de data)
+    // Filtro Hoje: Compara apenas os primeiros 10 caracteres da data (YYYY-MM-DD)
     const finishedToday = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
-      if (!dStr) return false;
-      const d = new Date(dStr);
-      const dOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      return dOnly === today;
+      return dStr && String(dStr).startsWith(todayISO);
     });
 
-    // Filtro de Finalizados no Mês
+    // Filtro Mês
     const finishedMonth = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
       if (!dStr) return false;
-      const d = new Date(dStr);
+      const d = new Date(String(dStr).replace(' ', 'T'));
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // TMA (Tempo Médio de Atendimento)
-    // Filtramos durações irreais (menos de 5s ou mais de 12h) para não distorcer a média
-    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 5 && (t.durationSeconds || 0) < 43200);
-    const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
-    const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
+    // Médias
+    const finishedWithTime = finished.filter(t => (t.durationSeconds || 0) > 0);
+    const totalTMA = finishedWithTime.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
+    const avgService = finishedWithTime.length > 0 ? totalTMA / finishedWithTime.length : 0;
 
-    // TME (Tempo Médio de Espera na Fila Agora)
     const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 
-    // Ranking de Atendentes
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
@@ -89,32 +82,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
           </div>
           <div>
             <h2 className="text-xl font-bold text-white tracking-tight">Métricas de Desempenho</h2>
-            <p className="text-slate-400 text-sm">Resumo operacional em tempo real.</p>
+            <p className="text-slate-400 text-sm">Atualizado em tempo real</p>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[120px]">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Média Espera</p>
             <div className="flex items-center gap-2">
               <Timer className="w-4 h-4 text-amber-500" />
               <p className="text-lg font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[120px]">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Média Conversa</p>
             <div className="flex items-center gap-2">
               <Headset className="w-4 h-4 text-sky-500" />
               <p className="text-lg font-mono font-bold text-sky-400">{formatTime(stats.avgService)}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[120px]">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Hoje)</p>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
               <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[120px]">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Mês)</p>
             <div className="flex items-center gap-2">
               <CalendarCheck className="w-4 h-4 text-violet-400" />
@@ -128,7 +121,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         <StatCard title="Fila de Espera" value={stats.waiting.length} icon={<Clock className="text-amber-500" />} colorClass="text-amber-500" />
         <StatCard title="Em Triagem" value={stats.bot.length} icon={<Bot className="text-violet-500" />} colorClass="text-violet-500" />
         <StatCard title="Atendimentos" value={stats.inService.length} icon={<Headset className="text-sky-500" />} colorClass="text-sky-500" />
-        <StatCard title="Atendentes Logados" value={stats.onlineCount} icon={<Users className="text-emerald-500" />} colorClass="text-emerald-500" />
+        <StatCard title="Atendentes Online" value={stats.onlineCount} icon={<Users className="text-emerald-500" />} colorClass="text-emerald-500" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -139,7 +132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64">
-           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Carga Operacional</p>
+           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Fluxo de Trabalho</p>
            <ResponsiveContainer width="100%" height="80%">
              <BarChart data={[
                {name:'Espera',v:stats.waiting.length,c:'#f59e0b'},
@@ -158,7 +151,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
            </ResponsiveContainer>
         </div>
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64 flex flex-col">
-           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Top Eficiência (Mês)</p>
+           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Top Performance (Mês)</p>
            <div className="flex-1 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
               {stats.ranking.length > 0 ? stats.ranking.map((item, i) => (
                 <div key={i} className="flex items-center justify-between p-2.5 rounded bg-slate-900/30 border border-slate-700/50 hover:border-slate-600 transition-colors">
@@ -166,10 +159,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${i === 0 ? 'bg-amber-500 text-amber-950' : 'bg-slate-700 text-slate-300'}`}>{i+1}</span>
                      <span className="text-sm text-slate-200 font-medium">{item.name}</span>
                    </div>
-                   <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded">{item.count} conv.</span>
+                   <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded">{item.count}</span>
                 </div>
               )) : (
-                <div className="flex-1 flex items-center justify-center text-slate-500 italic text-sm">Sem dados de encerramento no mês atual</div>
+                <div className="flex-1 flex items-center justify-center text-slate-500 italic text-sm">Sem finalizações registradas</div>
               )}
            </div>
         </div>
