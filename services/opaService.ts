@@ -1,17 +1,29 @@
 
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
-function parseOpaDate(dateStr?: string): number {
+/**
+ * Converte strings de data do Opa Suite (YYYY-MM-DD HH:mm:ss) para timestamp.
+ * Resolve problemas de fuso horário forçando a data a ser tratada como local.
+ */
+function parseOpaDate(dateStr?: any): number {
   if (!dateStr) return 0;
-  // Converte "2025-02-26 14:00:00" para "2025-02-26T14:00:00" para compatibilidade ISO
-  const isoStr = dateStr.includes(' ') && !dateStr.includes('T') 
-    ? dateStr.replace(' ', 'T') 
-    : dateStr;
-  const timestamp = Date.parse(isoStr);
-  return isNaN(timestamp) ? 0 : timestamp;
+  if (typeof dateStr === 'number') return dateStr;
+  
+  try {
+    const s = String(dateStr).trim();
+    if (!s) return 0;
+    
+    // Substitui espaço por T para formato ISO, mas garante que o browser não trate como UTC puro se não houver Z
+    const iso = s.replace(' ', 'T');
+    const ts = Date.parse(iso);
+    
+    return isNaN(ts) ? 0 : ts;
+  } catch {
+    return 0;
+  }
 }
 
-function calculateSeconds(startStr?: string, endStr?: string): number {
+function calculateSeconds(startStr?: any, endStr?: any): number {
   const start = parseOpaDate(startStr);
   if (start === 0) return 0;
   
@@ -73,51 +85,47 @@ export const opaService = {
 
         const status = determineTicketStatus(t, deptName);
         
-        // Datas brutas da API
+        // Mapeamento de Datas (Opa costuma variar os nomes entre versões)
         const dateCreated = t.data_criacao || t.data_abertura || t.createdAt;
-        const dateStarted = t.data_inicio || t.data_atendimento; 
+        const dateStarted = t.data_inicio || t.data_atendimento || t.dt_inicio; 
         const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt;
 
-        // RESOLUÇÃO DE NOME AVANÇADA
-        const protocol = t.protocolo || '';
+        // RESOLUÇÃO DE NOME (Filtro Anti-Protocolo)
+        const protocol = (t.protocolo || '').trim();
         let clientName = '';
 
-        // Campos onde o nome real costuma estar
-        const nameSources = [
+        const nameCandidates = [
+          t.cliente_nome,
+          t.contato_nome,
           t.id_cliente?.nome,
           t.id_cliente?.razao_social,
           t.id_contato?.nome,
-          t.cliente_nome,
-          t.contato_nome,
           t.nome
         ];
 
-        // Regex para identificar se o valor é um protocolo (Inicia com letras e tem muitos números)
-        const isProtocolRegex = /^[A-Z]{2,4}\d{6,}/i;
+        // Regex para detectar padrão de protocolo (ex: ITL20240101...)
+        const protocolRegex = /^[A-Z]{2,4}\d{8,}/i;
 
-        for (const source of nameSources) {
-          if (source) {
-            const val = String(source).trim();
-            // Só aceita se não for vazio, não for a palavra "cliente" e NÃO for o protocolo
-            if (val !== '' && 
+        for (const candidate of nameCandidates) {
+          if (candidate) {
+            const val = String(candidate).trim();
+            if (val && 
                 val.toLowerCase() !== 'cliente' && 
                 val !== protocol && 
-                !isProtocolRegex.test(val)) {
+                !protocolRegex.test(val) &&
+                val.length > 2) {
               clientName = val;
               break;
             }
           }
         }
 
-        // Se não achou nome real, tenta telefone como alternativa ao protocolo
+        // Se falhar, tenta telefone antes de aceitar o protocolo
         if (!clientName) {
-          const phone = t.id_contato?.fone || t.id_cliente?.fone || t.contato_fone || t.fone;
-          if (phone && String(phone).length > 5) {
-            clientName = String(phone);
-          }
+          const phone = t.contato_fone || t.id_contato?.fone || t.id_cliente?.fone || t.fone;
+          if (phone && String(phone).length > 5) clientName = String(phone);
         }
 
-        // Se ABSOLUTAMENTE tudo falhar, usa o protocolo
         if (!clientName) clientName = protocol || 'Cliente';
 
         let attName = undefined;
@@ -129,10 +137,10 @@ export const opaService = {
           protocol: protocol || 'N/A',
           clientName: clientName,
           contact: '',
-          // Espera: Da criação até o Início (ou Agora se na fila)
+          // Espera: Da criação até o Início (ou Agora)
           waitTimeSeconds: calculateSeconds(dateCreated, dateStarted || undefined),
-          // Atendimento: Do início até o Fim (ou Agora se em aberto)
-          durationSeconds: dateStarted ? calculateSeconds(dateStarted, status === 'finished' ? dateEnded : undefined) : 0,
+          // Atendimento: Do início (ou criação se não houver início) até o Fim (ou Agora)
+          durationSeconds: calculateSeconds(dateStarted || dateCreated, status === 'finished' ? dateEnded : undefined),
           status,
           attendantName: attName,
           department: deptName || 'Sem Setor',
@@ -141,6 +149,7 @@ export const opaService = {
         };
       });
 
+      // Contagem de chats ativos por atendente
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
@@ -150,7 +159,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro ao processar dados:", e);
+      console.error("[OpaService] Erro:", e);
       return { tickets: [], attendants: [] };
     }
   }

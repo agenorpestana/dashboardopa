@@ -22,7 +22,8 @@ const formatTime = (seconds: number) => {
 export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => {
   const stats = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toDateString();
+    // Normalização para comparação apenas de data (sem hora)
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
@@ -31,11 +32,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    // Filtro de Finalizados Hoje
+    // Filtro de Finalizados Hoje (Robustez com normalização de data)
     const finishedToday = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
       if (!dStr) return false;
-      return new Date(dStr).toDateString() === todayStr;
+      const d = new Date(dStr);
+      const dOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      return dOnly === today;
     });
 
     // Filtro de Finalizados no Mês
@@ -46,15 +49,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // TMA (Tempo Médio de Atendimento) - Considera atendimentos de hoje para ser mais dinâmico
-    const finishedForTMA = finished.filter(t => (t.durationSeconds || 0) > 0);
-    const totalTMA = finishedForTMA.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
-    const avgService = finishedForTMA.length > 0 ? totalTMA / finishedForTMA.length : 0;
+    // TMA (Tempo Médio de Atendimento)
+    // Filtramos durações irreais (menos de 5s ou mais de 12h) para não distorcer a média
+    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 5 && (t.durationSeconds || 0) < 43200);
+    const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
+    const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
 
-    // TME (Tempo Médio de Espera dos que estão aguardando)
+    // TME (Tempo Médio de Espera na Fila Agora)
     const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 
+    // Ranking de Atendentes
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
@@ -78,35 +83,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
       <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
-        <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Activity className="w-6 h-6 text-sky-400" /> Dashboard Operacional
-          </h2>
-          <p className="text-slate-400 text-sm">Dados consolidados da operação.</p>
+        <div className="flex items-center gap-4">
+          <div className="bg-sky-500/10 p-3 rounded-lg">
+            <Activity className="w-6 h-6 text-sky-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-tight">Métricas de Desempenho</h2>
+            <p className="text-slate-400 text-sm">Resumo operacional em tempo real.</p>
+          </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">T.M. Espera</p>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Média Espera</p>
             <div className="flex items-center gap-2">
               <Timer className="w-4 h-4 text-amber-500" />
               <p className="text-lg font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">T.M. Atendimento</p>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Média Conversa</p>
             <div className="flex items-center gap-2">
               <Headset className="w-4 h-4 text-sky-500" />
               <p className="text-lg font-mono font-bold text-sky-400">{formatTime(stats.avgService)}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Hoje)</p>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
               <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Mês)</p>
             <div className="flex items-center gap-2">
               <CalendarCheck className="w-4 h-4 text-violet-400" />
@@ -117,25 +125,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Em Espera" value={stats.waiting.length} icon={<Clock className="text-amber-500" />} colorClass="text-amber-500" />
-        <StatCard title="Com o Bot" value={stats.bot.length} icon={<Bot className="text-violet-500" />} colorClass="text-violet-500" />
-        <StatCard title="Em Atendimento" value={stats.inService.length} icon={<Headset className="text-sky-500" />} colorClass="text-sky-500" />
-        <StatCard title="Atendentes" value={stats.onlineCount} icon={<Users className="text-emerald-500" />} colorClass="text-emerald-500" />
+        <StatCard title="Fila de Espera" value={stats.waiting.length} icon={<Clock className="text-amber-500" />} colorClass="text-amber-500" />
+        <StatCard title="Em Triagem" value={stats.bot.length} icon={<Bot className="text-violet-500" />} colorClass="text-violet-500" />
+        <StatCard title="Atendimentos" value={stats.inService.length} icon={<Headset className="text-sky-500" />} colorClass="text-sky-500" />
+        <StatCard title="Atendentes Logados" value={stats.onlineCount} icon={<Users className="text-emerald-500" />} colorClass="text-emerald-500" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <TicketList title="Em Espera" tickets={stats.waiting} type="waiting" />
-        <TicketList title="Com o Bot" tickets={stats.bot} type="bot" />
-        <TicketList title="Em Atendimento" tickets={stats.inService} type="in_service" />
+        <TicketList title="Aguardando Setor" tickets={stats.waiting} type="waiting" />
+        <TicketList title="Em Bot / Triagem" tickets={stats.bot} type="bot" />
+        <TicketList title="Conversas Ativas" tickets={stats.inService} type="in_service" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64">
-           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Distribuição de Volume</p>
+           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Carga Operacional</p>
            <ResponsiveContainer width="100%" height="80%">
              <BarChart data={[
                {name:'Espera',v:stats.waiting.length,c:'#f59e0b'},
-               {name:'Bot',v:stats.bot.length,c:'#8b5cf6'},
+               {name:'Triagem',v:stats.bot.length,c:'#8b5cf6'},
                {name:'Ativos',v:stats.inService.length,c:'#0ea5e9'}
              ]} layout="vertical">
                <XAxis type="number" hide />
@@ -150,18 +158,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
            </ResponsiveContainer>
         </div>
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64 flex flex-col">
-           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Ranking Top 5 (Mês)</p>
+           <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Top Eficiência (Mês)</p>
            <div className="flex-1 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
               {stats.ranking.length > 0 ? stats.ranking.map((item, i) => (
                 <div key={i} className="flex items-center justify-between p-2.5 rounded bg-slate-900/30 border border-slate-700/50 hover:border-slate-600 transition-colors">
                    <div className="flex items-center gap-3">
                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${i === 0 ? 'bg-amber-500 text-amber-950' : 'bg-slate-700 text-slate-300'}`}>{i+1}</span>
-                     <span className="text-sm text-slate-200">{item.name}</span>
+                     <span className="text-sm text-slate-200 font-medium">{item.name}</span>
                    </div>
-                   <span className="text-xs font-mono text-emerald-400 font-bold">{item.count} concl.</span>
+                   <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded">{item.count} conv.</span>
                 </div>
               )) : (
-                <div className="flex-1 flex items-center justify-center text-slate-500 italic text-sm">Sem dados de finalização</div>
+                <div className="flex-1 flex items-center justify-center text-slate-500 italic text-sm">Sem dados de encerramento no mês atual</div>
               )}
            </div>
         </div>
