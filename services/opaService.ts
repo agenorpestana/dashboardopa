@@ -2,20 +2,37 @@
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
 /**
- * Converte qualquer formato de data do Opa Suite para timestamp numérico.
- * Garante que o formato "YYYY-MM-DD HH:mm:ss" seja tratado corretamente.
+ * Converte strings de data do Opa Suite (YYYY-MM-DD HH:mm:ss ou ISO) para timestamp.
+ * Tratamento manual para evitar falhas de parsing em diferentes browsers.
  */
 function toTimestamp(dateVal: any): number {
   if (!dateVal) return 0;
   if (typeof dateVal === 'number') return dateVal;
   
+  const s = String(dateVal).trim();
+  if (!s || s.startsWith('0000')) return 0;
+
   try {
-    const s = String(dateVal).trim();
-    if (!s || s === '0000-00-00 00:00:00') return 0;
+    // Tenta converter YYYY-MM-DD HH:mm:ss para YYYY-MM-DDTHH:mm:ss
+    const iso = s.includes(' ') && !s.includes('T') ? s.replace(' ', 'T') : s;
+    let ts = Date.parse(iso);
     
-    // Substitui espaço por T para compatibilidade ISO (YYYY-MM-DDTHH:mm:ss)
-    const isoStr = s.replace(' ', 'T');
-    const ts = new Date(isoStr).getTime();
+    // Se falhar (NaN), tenta um parse manual agressivo
+    if (isNaN(ts)) {
+      const parts = s.split(/[- :]/); // Divide por -, espaço ou :
+      if (parts.length >= 3) {
+        // Assume YYYY, MM, DD, HH, mm, ss
+        const d = new Date(
+          parseInt(parts[0]), 
+          parseInt(parts[1]) - 1, 
+          parseInt(parts[2]), 
+          parseInt(parts[3]) || 0, 
+          parseInt(parts[4]) || 0, 
+          parseInt(parts[5]) || 0
+        );
+        ts = d.getTime();
+      }
+    }
     
     return isNaN(ts) ? 0 : ts;
   } catch {
@@ -35,22 +52,25 @@ function calculateDuration(start: any, end?: any): number {
 }
 
 function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
-  const statusRaw = t.status || t.situacao;
+  const statusRaw = t.status || t.situacao || t.estado;
   const s = statusRaw ? String(statusRaw).toUpperCase().trim() : '';
 
-  if (['F', '3', '4', 'FINALIZADO'].includes(s)) return 'finished';
-  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) return 'in_service';
-  if (s === 'PS') return 'bot';
+  if (['F', '3', '4', 'FINALIZADO', 'CONCLUIDO'].includes(s)) return 'finished';
+  if (['EA', 'EM ATENDIMENTO', '2', 'A'].includes(s)) return 'in_service';
+  if (s === 'PS' || s === 'BOT') return 'bot';
 
-  if (['AG', 'AGUARDANDO', 'BOT', 'E', 'EE', 'EM ESPERA', '1', 'T', ''].includes(s)) {
+  // Se tem atendente, provavelmente está em atendimento
+  if (t.id_atendente || t.atendente) return 'in_service';
+
+  if (['AG', 'AGUARDANDO', 'E', 'EE', 'EM ESPERA', '1', 'T', ''].includes(s)) {
      const hasDept = departmentName && 
                     departmentName !== 'Geral' && 
                     departmentName !== 'Sem Setor' && 
+                    departmentName !== 'Suporte' &&
                     departmentName.trim() !== '';
      return hasDept ? 'waiting' : 'bot';
   }
 
-  if (t.id_atendente) return 'in_service';
   return 'bot'; 
 }
 
@@ -81,49 +101,61 @@ export const opaService = {
         const protocol = (t.protocolo || '').trim();
         
         // 1. Resolver Setor
-        const rawDept = t.setor || t.id_departamento || t.departamento;
+        const rawDept = t.id_departamento || t.setor || t.departamento;
         let deptName = '';
         if (typeof rawDept === 'object' && rawDept?.nome) deptName = rawDept.nome;
         else if (deptMap.has(String(rawDept))) deptName = deptMap.get(String(rawDept));
 
         const status = determineTicketStatus(t, deptName);
         
-        // 2. Resolver Datas (Variações do Opa)
+        // 2. Resolver Datas (Busca exaustiva por campos de data)
         const dateCreated = t.data_criacao || t.data_abertura || t.createdAt || t.dt_criacao;
         const dateStarted = t.data_inicio || t.data_atendimento || t.dt_inicio || t.data_hora_inicio; 
         const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt || t.dt_fechamento;
 
-        // 3. Resolver Nome do Cliente (Lógica Anti-Protocolo)
+        // 3. Resolver Nome do Cliente (Lógica Anti-Protocolo Agressiva)
         let clientName = '';
-        const nameCandidates = [
+        
+        // Lista de campos onde o nome REAL costuma estar no Opa Suite
+        const nameSources = [
           t.id_cliente?.nome,
           t.id_cliente?.razao_social,
-          t.cliente_nome,
           t.id_contato?.nome,
+          t.cliente_nome,
           t.contato_nome,
+          t.cliente?.nome,
+          t.nome_cliente,
           t.nome
         ];
 
-        for (const candidate of nameCandidates) {
+        for (const candidate of nameSources) {
           if (candidate) {
             const val = String(candidate).trim();
-            // Só aceita se for diferente do protocolo e não for "Cliente"
-            if (val && val !== protocol && val.toLowerCase() !== 'cliente' && val.length > 2) {
+            // Verificação: não pode ser o protocolo, não pode ser apenas números longos, não pode ser vazio
+            if (val && 
+                val !== protocol && 
+                val.toLowerCase() !== 'cliente' && 
+                !/^[A-Z]{2,4}\d{8,}/.test(val) && // Ignora padrões ITL2025...
+                val.length > 2) {
               clientName = val;
               break;
             }
           }
         }
 
-        // Fallback: Se ainda estiver vazio, tenta fone ou por último o protocolo
+        // Se falhou, tenta achar o telefone
         if (!clientName) {
-          const fone = t.id_contato?.fone || t.id_cliente?.fone || t.contato_fone;
-          clientName = fone ? String(fone) : (protocol || 'Cliente');
+          const fone = t.id_contato?.fone || t.id_cliente?.fone || t.contato_fone || t.fone;
+          if (fone && String(fone).length > 5) clientName = String(fone);
         }
 
-        // 4. Resolver Atendente
+        // Último recurso: Protocolo (o que está acontecendo no seu print)
+        if (!clientName) clientName = protocol || 'Cliente Anonimo';
+
+        // 4. Resolver Nome do Atendente
         let attName = undefined;
         if (t.id_atendente?.nome) attName = t.id_atendente.nome;
+        else if (t.atendente_nome) attName = t.atendente_nome;
         else if (attMap.has(String(t.id_atendente))) attName = attMap.get(String(t.id_atendente));
 
         return {
@@ -131,9 +163,9 @@ export const opaService = {
           protocol: protocol || 'N/A',
           clientName: clientName,
           contact: '',
-          // Espera: Da criação até o Início (ou Agora se ainda espera)
-          waitTimeSeconds: calculateDuration(dateCreated, dateStarted),
-          // Atendimento: Do início até o Fim (ou Agora se em curso)
+          // Espera: Criado até Início (se ainda não iniciou, usa Agora)
+          waitTimeSeconds: calculateDuration(dateCreated, dateStarted || undefined),
+          // Atendimento: Início até Fim (se em curso, usa Agora)
           durationSeconds: dateStarted ? calculateDuration(dateStarted, status === 'finished' ? dateEnded : undefined) : 0,
           status,
           attendantName: attName,
@@ -153,7 +185,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro fatal:", e);
+      console.error("[OpaService] Erro Fatal:", e);
       return { tickets: [], attendants: [] };
     }
   }

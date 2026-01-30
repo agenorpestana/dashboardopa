@@ -134,14 +134,25 @@ app.get('/api/dashboard-data', async (req, res) => {
     startDate.setDate(startDate.getDate() - 30);
     const startDateStr = startDate.toISOString().split('T')[0];
 
+    // População exaustiva para garantir que nomes venham preenchidos
+    const populateFields = [
+      "id_cliente", 
+      "id_atendente", 
+      "id_departamento", 
+      "setor", 
+      "id_contato", 
+      "cliente", 
+      "contato"
+    ];
+
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
-        "options": { "limit": 1000, "sort": "-data_criacao", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+        "options": { "limit": 1000, "sort": "-data_criacao", "populate": populateFields }
       }),
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": "F", "data_abertura": { "$gte": startDateStr } },
-        "options": { "limit": 2000, "sort": "-data_fechamento", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+        "options": { "limit": 2000, "sort": "-data_fechamento", "populate": populateFields }
       }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, { "filter": { "status": "A" }, "options": { "limit": 200 } }),
       requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })
