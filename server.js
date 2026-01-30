@@ -246,34 +246,23 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = normalizeUrl(config.api_url);
     const token = config.api_token.trim();
 
-    // Data de início: 30 dias atrás
+    // Data de início: 30 dias atrás para estatísticas mensais e ranking
     const startDate = getPastDate(30);
 
     console.log(`[Proxy] Buscando dados em: ${baseUrl}/api/v1/atendimento`);
 
-    // TENTATIVA 1: Filtro Otimizado
+    // TENTATIVA 1: Filtro Otimizado (Removido o $ne "F" para trazer finalizados dos últimos 30 dias)
     const payloadOptimized = {
        "filter": {
-          "dataInicialAbertura": startDate,
-          "status": { "$ne": "F" }
+          "dataInicialAbertura": startDate
        },
        "options": { 
-          "limit": 500,
+          "limit": 1000,
           "sort": "-_id",
-          "populate": ["id_cliente"]
+          "populate": ["id_cliente", "id_atendente", "setor"]
        }
     };
     
-    // Payload de Fallback
-    const payloadFallback = {
-        "filter": { "dataInicialAbertura": startDate },
-        "options": { 
-           "limit": 300, 
-           "sort": "-_id",
-           "populate": ["id_cliente"]
-        }
-    };
-
     // Busca de Usuários (Atendentes)
     const attendantsPayload = {
         "filter": { "status": "A", "tipo": "user" },
@@ -312,18 +301,9 @@ app.get('/api/dashboard-data', async (req, res) => {
     let debugMsg = "";
 
     // Lógica de Fallback para Tickets
-    if (!ticketsRes.ok || (ticketsRes.data && ticketsRes.data.length === 0)) {
-        console.warn(`[Proxy] Tentativa otimizada falhou ou retornou vazio (${ticketsRes.status}). Tentando fallback...`);
-        debugMsg += "Optimized failed. ";
-        
-        // Tenta sem o filtro $ne
-        ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, payloadFallback);
-        
-        // Se ainda falhar, tenta sem body nenhum
-        if (!ticketsRes.ok && (ticketsRes.status === 400 || ticketsRes.status === 403)) {
-           debugMsg += "Fallback failed. Trying simple GET. ";
-           ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=200&sort=-_id&populate=id_cliente`, 'GET', token, null);
-        }
+    if (!ticketsRes.ok) {
+        debugMsg += "Optimized failed. Trying simple GET. ";
+        ticketsRes = await requestWithBody(`${baseUrl}/api/v1/atendimento?limit=500&sort=-_id&populate=id_cliente`, 'GET', token, null);
     }
 
     // Processar resposta de Tickets
@@ -333,9 +313,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(ticketsRes.data)) {
         tickets = ticketsRes.data;
       }
-      console.log(`[Proxy] Tickets obtidos com sucesso: ${tickets.length}`);
-    } else {
-      debugMsg += `Final Failure: ${ticketsRes.error}`;
+      console.log(`[Proxy] Tickets obtidos: ${tickets.length}`);
     }
 
     // Processar resposta de Atendentes
@@ -346,7 +324,6 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(attendantsRes.data)) {
         attendants = attendantsRes.data;
       }
-      console.log(`[Proxy] Atendentes obtidos: ${attendants.length}`);
     }
 
     // Processar resposta de Clientes
@@ -357,7 +334,6 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(clientsRes.data)) {
         clients = clientsRes.data;
       }
-      console.log(`[Proxy] Clientes obtidos: ${clients.length}`);
     }
     
     // Processar resposta de Contatos
@@ -368,7 +344,6 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(contactsRes.data)) {
         contacts = contactsRes.data;
       }
-      console.log(`[Proxy] Contatos obtidos: ${contacts.length}`);
     }
 
     // Processar resposta de Departamentos
@@ -379,7 +354,6 @@ app.get('/api/dashboard-data', async (req, res) => {
       } else if (Array.isArray(departmentsRes.data)) {
         departments = departmentsRes.data;
       }
-      console.log(`[Proxy] Departamentos obtidos: ${departments.length}`);
     }
 
     // Retornar para o frontend

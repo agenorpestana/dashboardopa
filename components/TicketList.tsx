@@ -43,55 +43,54 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
   }
 
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col h-full shadow-lg">
+    <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col h-full shadow-lg min-h-[500px]">
       <div className={`p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center border-l-4 ${accentColor}`}>
-        <h3 className="font-semibold text-lg text-white uppercase tracking-wide flex items-center gap-2">
-          <Icon className={`w-5 h-5 ${badgeColor.split(' ')[1]}`} />
+        <h3 className="font-semibold text-base text-white uppercase tracking-wide flex items-center gap-2">
+          <Icon className={`w-4 h-4 ${badgeColor.split(' ')[1]}`} />
           {title}
         </h3>
-        <span className={`px-2 py-1 rounded text-xs font-bold ${badgeColor}`}>
-          {tickets.length} Total
+        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badgeColor}`}>
+          {tickets.length}
         </span>
       </div>
       
-      <div className="overflow-x-auto flex-1">
+      {/* Container com altura fixa para aproximadamente 6-7 linhas + Scrollbar */}
+      <div className="overflow-y-auto max-h-[420px] custom-scrollbar flex-1">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider">
-              {/* Coluna Contato removida conforme solicitado */}
-              <th className="p-4 font-medium w-1/2">Cliente</th> 
-              <th className="p-4 font-medium text-right">{type === 'in_service' ? 'Duração' : 'Espera'}</th>
-              <th className="p-4 font-medium text-right">Protocolo</th>
+            <tr className="bg-slate-900/50 text-slate-500 text-[10px] uppercase tracking-wider sticky top-0 z-10">
+              <th className="p-3 font-medium">Cliente</th> 
+              <th className="p-3 font-medium text-right">{type === 'in_service' ? 'Duração' : 'Espera'}</th>
+              <th className="p-3 font-medium text-right">Protocolo</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700/50">
+          <tbody className="divide-y divide-slate-700/30">
             {tickets.map((ticket) => (
-              <tr key={ticket.id} className="hover:bg-slate-700/30 transition-colors group">
-                <td className="p-4">
+              <tr key={ticket.id} className="hover:bg-slate-700/20 transition-colors group">
+                <td className="p-3">
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${avatarColor}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${avatarColor}`}>
                       {ticket.clientName.substring(0, 2).toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <p className="font-medium text-slate-200 truncate pr-2">{ticket.clientName}</p>
+                      <p className="font-medium text-sm text-slate-200 truncate pr-2 leading-tight">{ticket.clientName}</p>
                       {ticket.attendantName && type === 'in_service' && (
-                        <p className="text-xs text-slate-500 truncate">Atendente: {ticket.attendantName}</p>
+                        <p className="text-[10px] text-slate-500 truncate">Agent: {ticket.attendantName}</p>
                       )}
-                      {/* Mostra o departamento/setor se disponível na espera */}
                       {type === 'waiting' && ticket.department && (
-                         <p className="text-xs text-slate-500 truncate">Setor: {ticket.department}</p>
+                         <p className="text-[10px] text-slate-500 truncate">{ticket.department}</p>
                       )}
                     </div>
                   </div>
                 </td>
-                <td className="p-4 text-right whitespace-nowrap">
-                  <span className={`font-mono text-sm font-medium ${timerColor}`}>
+                <td className="p-3 text-right whitespace-nowrap">
+                  <span className={`font-mono text-xs font-medium ${timerColor}`}>
                     {formatTime(type === 'in_service' ? (ticket.durationSeconds || 0) : ticket.waitTimeSeconds)}
                   </span>
                 </td>
-                <td className="p-4 text-right whitespace-nowrap">
-                   <div className="flex items-center justify-end gap-1 text-slate-500 font-mono text-xs group-hover:text-slate-300">
-                      <Hash className="w-3 h-3" />
+                <td className="p-3 text-right whitespace-nowrap">
+                   <div className="flex items-center justify-end gap-1 text-slate-500 font-mono text-[10px] group-hover:text-slate-300">
+                      <Hash className="w-2.5 h-2.5" />
                       {ticket.protocol}
                    </div>
                 </td>
@@ -99,8 +98,8 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
             ))}
             {tickets.length === 0 && (
               <tr>
-                <td colSpan={3} className="p-8 text-center text-slate-500 italic">
-                  Nenhum atendimento neste status.
+                <td colSpan={3} className="p-10 text-center text-slate-500 text-sm italic">
+                  Vazio
                 </td>
               </tr>
             )}

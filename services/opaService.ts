@@ -1,38 +1,5 @@
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
-// Mock Data Generators (Fallback)
-const NAMES = ['Maria Silva', 'João Souza', 'Ana Pereira', 'Carlos Oliveira', 'Fernanda Lima', 'Roberto Santos'];
-const CONTACTS = ['maria@exemplo.com', '11999998888', 'ana.p@company.com', 'carlos@tech.br', '5511988887777', 'roberto@email.com'];
-const ATTENDANTS = ['Pedro Suporte', 'Julia Atendimento', 'Marcos Vendas'];
-
-function generateMockTickets(): Ticket[] {
-  return Array.from({ length: 8 }).map((_, i) => {
-      let status: TicketStatus = 'waiting';
-      const rand = Math.random();
-      if (rand > 0.6) status = 'in_service';
-      else if (rand > 0.3) status = 'bot';
-
-      return {
-          id: `MOCK-${i}`,
-          protocol: `TEST-${i}`,
-          clientName: NAMES[i % NAMES.length],
-          contact: CONTACTS[i % CONTACTS.length],
-          waitTimeSeconds: Math.floor(Math.random() * 600),
-          status: status,
-          department: 'Teste'
-      };
-  });
-}
-
-function generateMockAttendants(): Attendant[] {
-  return ATTENDANTS.map((name, idx) => ({
-    id: `ATT-${idx}`,
-    name,
-    status: 'online',
-    activeChats: Math.floor(Math.random() * 3)
-  }));
-}
-
 // Calcula segundos passados
 function calculateSeconds(dateStr?: string): number {
   if (!dateStr) return 0;
@@ -55,7 +22,7 @@ function formatPhoneNumber(phone: string): string {
   return phone;
 }
 
-// Nova Função de Lógica de Status (Status + Setor)
+// Função de Lógica de Status (Status + Setor)
 function determineTicketStatus(statusRaw: any, departmentName?: string): TicketStatus {
   if (!statusRaw) return 'finished'; 
   
@@ -68,12 +35,8 @@ function determineTicketStatus(statusRaw: any, departmentName?: string): TicketS
   
   // 2. Lógica para 'AG' (Aguardando) e 'PS' (Pesquisa)
   if (['AG', 'AGUARDANDO', 'BOT', 'PS'].includes(s)) {
-     // Se for Pesquisa de Satisfação (PS), consideramos BOT/Automação
      if (s === 'PS') return 'bot';
-
-     // Se for AG, verificamos se tem Setor (Nome do setor resolvido)
      const hasDepartment = departmentName && departmentName !== 'Geral' && departmentName !== 'Sem Setor';
-
      if (hasDepartment) {
         return 'waiting';
      } else {
@@ -91,7 +54,6 @@ function determineTicketStatus(statusRaw: any, departmentName?: string): TicketS
     return 'finished';
   }
   
-  // Qualquer outra coisa oculta
   return 'finished'; 
 }
 
@@ -109,196 +71,86 @@ export const opaService = {
         const rawContacts = data.contacts || [];
         const rawDepartments = data.departments || [];
 
-        console.log(`[OpaService] Tickets Brutos: ${rawTickets.length}`);
-        
-        if(rawTickets.length > 0) {
-             const uniqueStatuses = [...new Set(rawTickets.map((t: any) => t.status || t.situacao))];
-             console.log('[OpaService] Status Encontrados na API:', uniqueStatuses);
-        }
-
-        // 1. Criar mapa de Atendentes
+        // 1. Criar mapas de apoio
         const attendantMap = new Map<string, string>();
-        
         let attendants: Attendant[] = rawAttendants.map((a: any) => {
           const id = String(a._id || a.id);
           const name = a.nome || a.name || 'Agente';
           attendantMap.set(id, name);
-          
           const isOnline = a.status === 'A' || a.status === 'ativo' || a.is_online;
-
-          return {
-            id,
-            name,
-            status: isOnline ? 'online' : 'busy',
-            activeChats: 0
-          };
+          return { id, name, status: isOnline ? 'online' : 'busy', activeChats: 0 };
         });
 
-        // 2. Criar mapa de Clientes
         const clientMap = new Map<string, string>();
         rawClients.forEach((c: any) => {
-             const id = String(c._id || c.id);
-             const name = c.nome || c.fantasia || 'Cliente';
-             clientMap.set(id, name);
+             clientMap.set(String(c._id || c.id), c.nome || c.fantasia || 'Cliente');
         });
 
-        // 3. Criar mapa de Contatos
         const phoneMap = new Map<string, string>();
         rawContacts.forEach((c: any) => {
              if (c.nome && Array.isArray(c.fones)) {
                  c.fones.forEach((f: any) => {
-                     if (f.numero) {
-                         const cleanPhone = String(f.numero).replace(/\D/g, '');
-                         phoneMap.set(cleanPhone, c.nome);
-                     }
+                     if (f.numero) phoneMap.set(String(f.numero).replace(/\D/g, ''), c.nome);
                  });
              }
         });
 
-        // 4. Criar mapa de Departamentos (Setores)
         const departmentMap = new Map<string, string>();
         rawDepartments.forEach((d: any) => {
-            const id = String(d._id || d.id);
-            const name = d.nome || 'Setor';
-            departmentMap.set(id, name);
+            departmentMap.set(String(d._id || d.id), d.nome || 'Setor');
         });
 
-        // 5. Mapear Tickets
+        // 2. Mapear Tickets (Todos, incluindo finalizados)
         const tickets: Ticket[] = rawTickets.map((t: any) => {
            const rawStatus = t.status || t.situacao;
            const rawDept = t.setor || t.departamento || t.id_departamento; 
 
-           // Resolve o nome do setor
            let departmentName = undefined;
-           if (typeof rawDept === 'object' && rawDept?.nome) {
-               departmentName = rawDept.nome;
-           } else if (typeof rawDept === 'string' && departmentMap.has(rawDept)) {
-               departmentName = departmentMap.get(rawDept);
-           } else if (typeof rawDept === 'string' && rawDept.length > 0) {
-               departmentName = "Geral"; // ID existe mas não achou no map
-           }
+           if (typeof rawDept === 'object' && rawDept?.nome) departmentName = rawDept.nome;
+           else if (typeof rawDept === 'string' && departmentMap.has(rawDept)) departmentName = departmentMap.get(rawDept);
 
-           // Determina status baseado no Status + Setor Resolvido
            const status = determineTicketStatus(rawStatus, departmentName);
-           
-           const dateField = t.date || t.data_criacao; 
-
-           let channelContact = '';
-           if (t.canal_cliente) {
-              channelContact = t.canal_cliente.split('@')[0];
-           }
+           const dateField = t.date || t.data_criacao || t.data_inicio; 
+           const dateEnd = t.data_fechamento || t.updated_at;
 
            let clientName = 'Cliente';
-           let contact = 'N/A';
-           
-           // Lógica de nome do cliente...
-           if (t.id_cliente && typeof t.id_cliente === 'object') {
-              clientName = t.id_cliente.nome || t.id_cliente.fantasia || clientName;
-              contact = t.id_cliente.cpf_cnpj || t.id_cliente.telefone || channelContact || contact;
-           } 
-           else if (t.id_cliente && typeof t.id_cliente === 'string' && clientMap.has(t.id_cliente)) {
-              clientName = clientMap.get(t.id_cliente) || clientName;
-           }
-           else if (t.cliente && typeof t.cliente === 'object' && (t.cliente.nome || t.cliente.fantasia)) {
-              clientName = t.cliente.nome || t.cliente.fantasia;
-           }
-           else if (t.nome_cliente) {
-              clientName = t.nome_cliente;
-           }
-           else if (t.origem && typeof t.origem === 'object') {
-              if (t.origem.nome) clientName = t.origem.nome;
-              else if (t.origem.apelido) clientName = t.origem.apelido;
-              else if (t.origem.senderName) clientName = t.origem.senderName;
-           }
-           else if (t.client_name) {
-              clientName = t.client_name;
-           }
-
-           if (contact === 'N/A' && channelContact) {
-              contact = channelContact;
-           }
-           
-           const isNameNumeric = /^\d+$/.test(clientName.replace(/\D/g, ''));
-           
-           if ((clientName === 'Cliente' || !clientName || isNameNumeric) && contact !== 'N/A') {
-              const ticketPhone = contact.replace(/\D/g, '');
-              if (phoneMap.has(ticketPhone)) {
-                 clientName = phoneMap.get(ticketPhone)!;
-              } else {
-                 if (contact.startsWith('55') && contact.length >= 12) {
-                    clientName = formatPhoneNumber(contact);
-                 } else {
-                    clientName = contact;
-                 }
-              }
-           }
+           if (t.id_cliente && typeof t.id_cliente === 'object') clientName = t.id_cliente.nome || t.id_cliente.fantasia || clientName;
+           else if (t.nome_cliente) clientName = t.nome_cliente;
 
            let attendantName = undefined;
-           if (t.id_atendente && typeof t.id_atendente === 'object') {
-              attendantName = t.id_atendente.nome;
-           } 
-           else if (t.id_atendente) {
-              attendantName = attendantMap.get(String(t.id_atendente));
-           }
-
-           if (!attendantName && t.id_atendente) {
-              attendantName = "Atendente"; 
-           }
+           if (t.id_atendente && typeof t.id_atendente === 'object') attendantName = t.id_atendente.nome;
+           else if (t.id_atendente) attendantName = attendantMap.get(String(t.id_atendente));
 
            return {
               id: String(t._id || t.id),
               protocol: t.protocolo || 'N/A',
               clientName: clientName || 'Cliente',
-              contact: formatPhoneNumber(contact),
+              contact: '',
               waitTimeSeconds: calculateSeconds(dateField),
-              durationSeconds: (status === 'in_service') ? calculateSeconds(dateField) : undefined,
+              durationSeconds: (status === 'in_service' || status === 'finished') ? calculateSeconds(dateField) : undefined,
               status,
               attendantName,
-              department: departmentName || 'Geral'
+              department: departmentName || 'Geral',
+              createdAt: dateField,
+              closedAt: dateEnd
            };
         });
 
-        // 5. Filtrar finalizados
-        const activeTickets = tickets.filter(t => t.status !== 'finished');
-
-        // 6. Calcular Chats Ativos
-        activeTickets.forEach(t => {
+        // 3. Calcular Chats Ativos apenas para os não finalizados
+        tickets.forEach(t => {
            if (t.status === 'in_service' && t.attendantName) {
               const att = attendants.find(a => a.name === t.attendantName);
-              if (att) {
-                 att.activeChats++;
-              }
+              if (att) att.activeChats++;
            }
         });
 
-        // 7. Fallback se não veio atendentes
-        if (attendants.length === 0 && activeTickets.length > 0) {
-           const names = new Set<string>();
-           activeTickets.forEach(t => {
-             if (t.attendantName && t.status === 'in_service') names.add(t.attendantName);
-           });
-           attendants = Array.from(names).map((name, i) => ({
-             id: `gen-${i}`, name, status: 'online', activeChats: 0
-           }));
-           activeTickets.forEach(t => {
-              if (t.status === 'in_service' && t.attendantName) {
-                 const att = attendants.find(a => a.name === t.attendantName);
-                 if (att) att.activeChats++;
-              }
-           });
-        }
-
-        return { tickets: activeTickets, attendants };
+        return { tickets, attendants };
 
       } catch (error) {
-        console.warn("[OpaService] Erro na conexão, usando Mock:", error);
+        console.warn("[OpaService] Erro na conexão:", error);
+        return { tickets: [], attendants: [] };
       }
     }
-
-    // Fallback Mock
-    return {
-       tickets: generateMockTickets(),
-       attendants: generateMockAttendants()
-    };
+    return { tickets: [], attendants: [] };
   }
 };
