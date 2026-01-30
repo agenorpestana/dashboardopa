@@ -12,55 +12,38 @@ function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
   const statusRaw = t.status || t.situacao;
   const s = statusRaw ? String(statusRaw).toUpperCase().trim() : '';
 
-  // 1. FINALIZADO: Se o status for F ou códigos de finalização
-  if (['F', '3', '4', 'FINALIZADO'].includes(s)) {
-    return 'finished';
-  }
+  if (['F', '3', '4', 'FINALIZADO'].includes(s)) return 'finished';
+  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) return 'in_service';
+  if (s === 'PS') return 'bot';
 
-  // 2. EM ATENDIMENTO (Regra: EA = Em atendimento)
-  if (['EA', 'EM ATENDIMENTO', '2'].includes(s)) {
-    return 'in_service';
-  }
-
-  // 3. PESQUISA (Regra: PS = Com o bot)
-  if (s === 'PS') {
-    return 'bot';
-  }
-
-  // 4. AGUARDANDO / EM ESPERA (Regra: AG = Bot se sem setor, Espera se com setor)
   if (['AG', 'AGUARDANDO', 'BOT', 'E', 'EE', 'EM ESPERA', '1', 'T', ''].includes(s)) {
-     // Consideramos que tem setor se o nome do departamento não for genérico ou vazio
      const hasDept = departmentName && 
                     departmentName !== 'Geral' && 
                     departmentName !== 'Sem Setor' && 
                     departmentName.trim() !== '';
-     
      return hasDept ? 'waiting' : 'bot';
   }
 
-  // Fallback de segurança: Se tem atendente e não caiu nas regras acima, provavelmente está em atendimento
-  if (t.id_atendente) {
-    return 'in_service';
-  }
-
+  if (t.id_atendente) return 'in_service';
   return 'bot'; 
 }
 
-// Formata telefone (Ex: 5547999999999 -> (47) 99999-9999)
 function formatPhone(phone?: any): string | null {
   if (!phone) return null;
   const p = String(phone).replace(/\D/g, '');
-  if (p.length < 10) return p;
+  if (p.length < 8) return p;
   
-  if (p.startsWith('55')) {
+  let result = p;
+  if (p.startsWith('55') && p.length >= 12) {
     const sub = p.substring(2);
-    if (sub.length === 11) {
-      return `(${sub.substring(0,2)}) ${sub.substring(2,7)}-${sub.substring(7)}`;
-    } else if (sub.length === 10) {
-      return `(${sub.substring(0,2)}) ${sub.substring(2,6)}-${sub.substring(6)}`;
-    }
+    if (sub.length === 11) result = `(${sub.substring(0,2)}) ${sub.substring(2,7)}-${sub.substring(7)}`;
+    else if (sub.length === 10) result = `(${sub.substring(0,2)}) ${sub.substring(2,6)}-${sub.substring(6)}`;
+  } else if (p.length === 11) {
+    result = `(${p.substring(0,2)}) ${p.substring(2,7)}-${p.substring(7)}`;
+  } else if (p.length === 10) {
+    result = `(${p.substring(0,2)}) ${p.substring(2,6)}-${p.substring(6)}`;
   }
-  return p;
+  return result;
 }
 
 export const opaService = {
@@ -75,11 +58,9 @@ export const opaService = {
       const rawAttendants = data.attendants || [];
       const rawDepartments = data.departments || [];
 
-      // Mapeamento de departamentos para busca rápida
       const deptMap = new Map();
       rawDepartments.forEach((d: any) => deptMap.set(String(d._id || d.id), d.nome));
 
-      // Mapeamento de atendentes para busca rápida
       const attMap = new Map();
       const attendants: Attendant[] = rawAttendants.map((a: any) => {
         const id = String(a._id || a.id);
@@ -98,27 +79,52 @@ export const opaService = {
         const dateStart = t.data_inicio || t.data_criacao || t.date;
         const dateEnd = t.data_fechamento || t.updated_at;
 
-        // RESOLUÇÃO MELHORADA DO NOME DO CLIENTE / TELEFONE
-        let clientName = null;
-        
-        // 1. Tentar Nome Formal
-        if (t.id_cliente?.nome) clientName = t.id_cliente.nome;
-        else if (t.nome_cliente) clientName = t.nome_cliente;
-        else if (t.cliente?.nome) clientName = t.cliente.nome;
-        else if (t.contato_nome) clientName = t.contato_nome;
-        else if (t.id_contato?.nome) clientName = t.id_contato.nome;
-        
-        // 2. Tentar Telefone se o nome for genérico ou nulo
-        if (!clientName || clientName.toLowerCase() === 'cliente') {
-           const phoneRaw = t.contato_fone || t.fone || t.telefone || t.id_contato?.fone || t.id_cliente?.fone;
-           const formatted = formatPhone(phoneRaw);
-           if (formatted) clientName = formatted;
+        // RESOLUÇÃO AGRESSIVA DE NOME / TELEFONE
+        let nameFound = null;
+
+        // 1. Verificar em todas as propriedades de NOME possíveis
+        const possibleNames = [
+          t.id_cliente?.nome,
+          t.id_cliente?.name,
+          t.id_cliente?.razao_social,
+          t.nome_cliente,
+          t.cliente?.nome,
+          t.contato_nome,
+          t.id_contato?.nome,
+          t.id_contato?.name,
+          t.nome
+        ];
+
+        for (const n of possibleNames) {
+          if (n && String(n).trim() !== '' && String(n).toLowerCase() !== 'cliente') {
+            nameFound = String(n).trim();
+            break;
+          }
         }
 
-        // 3. Fallback final
-        if (!clientName) clientName = 'Cliente';
+        // 2. Se não achou nome, buscar Telefone em todas as fontes
+        if (!nameFound) {
+          const possiblePhones = [
+            t.contato_fone,
+            t.fone,
+            t.telefone,
+            t.id_contato?.fone,
+            t.id_contato?.telefone,
+            t.id_cliente?.fone,
+            t.id_cliente?.telefone
+          ];
+          for (const p of possiblePhones) {
+            const formatted = formatPhone(p);
+            if (formatted && formatted.length > 5) {
+              nameFound = formatted;
+              break;
+            }
+          }
+        }
 
-        // Resolução do nome do atendente
+        // 3. Fallback se nada foi encontrado
+        if (!nameFound) nameFound = 'Cliente';
+
         let attName = undefined;
         if (t.id_atendente?.nome) attName = t.id_atendente.nome;
         else if (attMap.has(String(t.id_atendente))) attName = attMap.get(String(t.id_atendente));
@@ -126,7 +132,7 @@ export const opaService = {
         return {
           id: String(t._id || t.id),
           protocol: t.protocolo || 'N/A',
-          clientName,
+          clientName: nameFound,
           contact: '',
           waitTimeSeconds: calculateSeconds(dateStart),
           durationSeconds: calculateSeconds(dateStart),
@@ -138,7 +144,6 @@ export const opaService = {
         };
       });
 
-      // Contagem de chats ativos para os atendentes
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);

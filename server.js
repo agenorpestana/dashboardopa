@@ -132,18 +132,23 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
+    // Usamos o formato YYYY-MM-DD que é o padrão da API do Opa
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    // BUSCA 1: Tickets ATIVOS (Garante que nunca sumam)
+    // BUSCA 1: Tickets ATIVOS
     const activePayload = {
       "filter": { "status": { "$ne": "F" } },
       "options": { "limit": 1000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
     };
 
-    // BUSCA 2: Tickets FINALIZADOS (Priorizando os mais recentes com sort -_id e limite maior)
+    // BUSCA 2: Tickets FINALIZADOS
+    // Alterado o filtro para ser mais abrangente (data_inicio ou data_criacao)
     const historyPayload = {
-      "filter": { "status": "F", "dataInicialAbertura": { "$gte": startDateStr } },
-      "options": { "limit": 2000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
+      "filter": { 
+        "status": "F", 
+        "data_inicio": { "$gte": startDateStr } 
+      },
+      "options": { "limit": 3000, "sort": "-_id", "populate": ["id_cliente", "id_atendente", "id_departamento", "setor", "id_contato"] }
     };
 
     const [activeRes, historyRes, uRes, dRes] = await Promise.all([
@@ -153,14 +158,14 @@ app.get('/api/dashboard-data', async (req, res) => {
       requestWithBody(`${baseUrl}/api/v1/departamento`, 'GET', token, { "options": { "limit": 100 } })
     ]);
 
-    const activeTickets = activeRes.ok ? (activeRes.data.data || activeRes.data) : [];
-    const historyTickets = historyRes.ok ? (historyRes.data.data || historyRes.data) : [];
+    let activeTickets = activeRes.ok ? (activeRes.data.data || activeRes.data) : [];
+    let historyTickets = historyRes.ok ? (historyRes.data.data || historyRes.data) : [];
 
-    // Combinar as duas listas garantindo que sejam arrays
-    const allTickets = Array.isArray(activeTickets) ? [...activeTickets] : [];
-    if (Array.isArray(historyTickets)) {
-       allTickets.push(...historyTickets);
-    }
+    // Garantir que são arrays antes de unir
+    if (!Array.isArray(activeTickets)) activeTickets = [];
+    if (!Array.isArray(historyTickets)) historyTickets = [];
+
+    const allTickets = [...activeTickets, ...historyTickets];
 
     res.json({
       success: true,
