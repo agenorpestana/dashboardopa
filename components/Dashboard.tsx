@@ -22,7 +22,7 @@ const formatTime = (seconds: number) => {
 export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => {
   const stats = useMemo(() => {
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayStr = now.toDateString();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
@@ -31,13 +31,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    // Filtro de Finalizados Hoje (ignora horas para comparação justa)
+    // Filtro de Finalizados Hoje
     const finishedToday = finished.filter(t => {
       const dStr = t.closedAt || t.createdAt;
       if (!dStr) return false;
-      const d = new Date(dStr);
-      const dTime = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      return dTime === today;
+      return new Date(dStr).toDateString() === todayStr;
     });
 
     // Filtro de Finalizados no Mês
@@ -48,16 +46,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // TMA (Tempo Médio de Atendimento)
-    const finishedWithDuration = finished.filter(t => (t.durationSeconds || 0) > 0);
-    const totalTMA = finishedWithDuration.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
-    const avgService = finishedWithDuration.length > 0 ? totalTMA / finishedWithDuration.length : 0;
+    // TMA (Tempo Médio de Atendimento) - Considera atendimentos de hoje para ser mais dinâmico
+    const finishedForTMA = finished.filter(t => (t.durationSeconds || 0) > 0);
+    const totalTMA = finishedForTMA.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
+    const avgService = finishedForTMA.length > 0 ? totalTMA / finishedForTMA.length : 0;
 
-    // TME (Tempo Médio de Espera dos que estão na fila agora)
+    // TME (Tempo Médio de Espera dos que estão aguardando)
     const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 
-    // Ranking
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
@@ -80,13 +77,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* Cards Superiores de Métricas */}
       <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Activity className="w-6 h-6 text-sky-400" /> Dashboard Operacional
           </h2>
-          <p className="text-slate-400 text-sm">Dados atualizados em tempo real.</p>
+          <p className="text-slate-400 text-sm">Dados consolidados da operação.</p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
@@ -133,7 +129,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         <TicketList title="Em Atendimento" tickets={stats.inService} type="in_service" />
       </div>
 
-      {/* Seção Inferior: Gráfico e Ranking */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg h-64">
            <p className="text-xs uppercase text-slate-500 font-bold mb-4 flex items-center gap-2"><Activity className="w-4 h-4" /> Distribuição de Volume</p>

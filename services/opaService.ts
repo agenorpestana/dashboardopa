@@ -1,19 +1,25 @@
 
 import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
+function parseOpaDate(dateStr?: string): number {
+  if (!dateStr) return 0;
+  // Converte "2025-02-26 14:00:00" para "2025-02-26T14:00:00" para compatibilidade ISO
+  const isoStr = dateStr.includes(' ') && !dateStr.includes('T') 
+    ? dateStr.replace(' ', 'T') 
+    : dateStr;
+  const timestamp = Date.parse(isoStr);
+  return isNaN(timestamp) ? 0 : timestamp;
+}
+
 function calculateSeconds(startStr?: string, endStr?: string): number {
-  if (!startStr) return 0;
-  try {
-    const start = new Date(startStr.replace(' ', 'T')).getTime();
-    if (isNaN(start)) return 0;
-    const end = endStr ? new Date(endStr.replace(' ', 'T')).getTime() : new Date().getTime();
-    if (isNaN(end)) return 0;
-    
-    const diff = Math.floor((end - start) / 1000);
-    return diff > 0 ? diff : 0;
-  } catch {
-    return 0;
-  }
+  const start = parseOpaDate(startStr);
+  if (start === 0) return 0;
+  
+  const end = endStr ? parseOpaDate(endStr) : Date.now();
+  if (end === 0) return 0;
+  
+  const diff = Math.floor((end - start) / 1000);
+  return diff > 0 ? diff : 0;
 }
 
 function determineTicketStatus(t: any, departmentName?: string): TicketStatus {
@@ -67,15 +73,17 @@ export const opaService = {
 
         const status = determineTicketStatus(t, deptName);
         
+        // Datas brutas da API
         const dateCreated = t.data_criacao || t.data_abertura || t.createdAt;
         const dateStarted = t.data_inicio || t.data_atendimento; 
         const dateEnded = t.data_fechamento || t.data_fim || t.updatedAt;
 
-        // LÓGICA DE NOME RESTAURADA E MELHORADA
+        // RESOLUÇÃO DE NOME AVANÇADA
         const protocol = t.protocolo || '';
         let clientName = '';
 
-        const namePriority = [
+        // Campos onde o nome real costuma estar
+        const nameSources = [
           t.id_cliente?.nome,
           t.id_cliente?.razao_social,
           t.id_contato?.nome,
@@ -84,13 +92,32 @@ export const opaService = {
           t.nome
         ];
 
-        for (const n of namePriority) {
-          if (n && String(n).trim() !== '' && n !== protocol && String(n).toLowerCase() !== 'cliente') {
-            clientName = String(n).trim();
-            break;
+        // Regex para identificar se o valor é um protocolo (Inicia com letras e tem muitos números)
+        const isProtocolRegex = /^[A-Z]{2,4}\d{6,}/i;
+
+        for (const source of nameSources) {
+          if (source) {
+            const val = String(source).trim();
+            // Só aceita se não for vazio, não for a palavra "cliente" e NÃO for o protocolo
+            if (val !== '' && 
+                val.toLowerCase() !== 'cliente' && 
+                val !== protocol && 
+                !isProtocolRegex.test(val)) {
+              clientName = val;
+              break;
+            }
           }
         }
 
+        // Se não achou nome real, tenta telefone como alternativa ao protocolo
+        if (!clientName) {
+          const phone = t.id_contato?.fone || t.id_cliente?.fone || t.contato_fone || t.fone;
+          if (phone && String(phone).length > 5) {
+            clientName = String(phone);
+          }
+        }
+
+        // Se ABSOLUTAMENTE tudo falhar, usa o protocolo
         if (!clientName) clientName = protocol || 'Cliente';
 
         let attName = undefined;
@@ -102,9 +129,9 @@ export const opaService = {
           protocol: protocol || 'N/A',
           clientName: clientName,
           contact: '',
-          // Espera: Da criação até o Início (ou até Agora se não iniciou)
+          // Espera: Da criação até o Início (ou Agora se na fila)
           waitTimeSeconds: calculateSeconds(dateCreated, dateStarted || undefined),
-          // Atendimento: Do início até o Fim (ou até Agora se ainda ativo)
+          // Atendimento: Do início até o Fim (ou Agora se em aberto)
           durationSeconds: dateStarted ? calculateSeconds(dateStarted, status === 'finished' ? dateEnded : undefined) : 0,
           status,
           attendantName: attName,
@@ -123,7 +150,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro:", e);
+      console.error("[OpaService] Erro ao processar dados:", e);
       return { tickets: [], attendants: [] };
     }
   }
