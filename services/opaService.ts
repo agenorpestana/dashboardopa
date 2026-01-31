@@ -26,37 +26,25 @@ function determineTicketStatus(t: any): TicketStatus {
   return 'bot'; 
 }
 
-/**
- * Formata números de telefone para o padrão (XX) XXXXX-XXXX ou (XX) XXXX-XXXX
- */
 function formatPhone(phone: string): string {
   if (!phone) return '';
-  // Remove tudo que não for número
   let cleaned = phone.replace(/\D/g, '');
-  
-  // Se começar com 55 e tiver 12 ou 13 dígitos, remove o 55
   if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
     cleaned = cleaned.substring(2);
   }
-
-  // Celular com DDD: (XX) XXXXX-XXXX (11 dígitos)
   if (cleaned.length === 11) {
     return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
   }
-  // Fixo com DDD: (XX) XXXX-XXXX (10 dígitos)
   if (cleaned.length === 10) {
     return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 6)}-${cleaned.substring(6)}`;
   }
-  // Sem DDD mas com 9 dígitos (Celular)
   if (cleaned.length === 9) {
     return `${cleaned.substring(0, 5)}-${cleaned.substring(5)}`;
   }
-  // Sem DDD mas com 8 dígitos (Fixo)
   if (cleaned.length === 8) {
     return `${cleaned.substring(0, 4)}-${cleaned.substring(4)}`;
   }
-
-  return phone; // Retorna original se não encaixar nos padrões
+  return phone;
 }
 
 export const opaService = {
@@ -72,6 +60,18 @@ export const opaService = {
       const rawAttendants = result.attendants || [];
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
+
+      // NOMES DE ROBÔS PARA FILTRAR
+      const ROBOT_NAMES = ["Victor (Robô de Adentimento)", "Victor"];
+
+      // LOG DE DEPURACÃO PARA O USUÁRIO VER IDs E NOMES NO CONSOLE (F12)
+      console.log("%c--- LISTA DE ATENDENTES DETECTADOS ---", "color: #0ea5e9; font-weight: bold; font-size: 12px;");
+      console.table(rawAttendants.map((a: any) => ({
+        ID: a._id || a.id,
+        Nome: a.nome,
+        Status: a.status === 'A' ? 'Ativo' : 'Inativo',
+        Bot: ROBOT_NAMES.some(rName => String(a.nome || '').includes(rName)) ? 'SIM' : 'NÃO'
+      })));
 
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
@@ -91,17 +91,23 @@ export const opaService = {
       });
 
       const attendantLookup = new Map<string, string>();
-      const attendants: Attendant[] = rawAttendants.map((a: any) => {
-        const id = String(a._id || a.id);
-        const name = a.nome || 'Agente';
-        attendantLookup.set(id, name);
-        return {
-          id,
-          name,
-          status: a.status === 'A' ? 'online' : 'offline',
-          activeChats: 0
-        };
-      });
+      const attendants: Attendant[] = rawAttendants
+        .filter((a: any) => {
+          // Filtra o robô da lista de atendentes ativos
+          const name = a.nome || '';
+          return !ROBOT_NAMES.some(rName => name.includes(rName));
+        })
+        .map((a: any) => {
+          const id = String(a._id || a.id);
+          const name = a.nome || 'Agente';
+          attendantLookup.set(id, name);
+          return {
+            id,
+            name,
+            status: a.status === 'A' ? 'online' : 'offline',
+            activeChats: 0
+          };
+        });
 
       const tickets: Ticket[] = rawTickets.map((t: any) => {
         const protocol = (t.protocolo || '').trim();
@@ -141,38 +147,33 @@ export const opaService = {
           if (!str) return true;
           const s = str.trim().toUpperCase();
           const p = protocol.toUpperCase();
-          return s === 'CLIENTE' || 
-                 s === 'ANONIMO' || 
-                 s === 'NULL' ||
-                 s === 'WHATSAPP USER' ||
-                 s === p || 
-                 s.includes(p) ||
-                 /^(ITL|OPA|PRT)/.test(s) || 
-                 (s.length >= 8 && /^\d+$/.test(s)); 
+          return s === 'CLIENTE' || s === 'ANONIMO' || s === 'NULL' || s === 'WHATSAPP USER' ||
+                 s === p || s.includes(p) || /^(ITL|OPA|PRT)/.test(s) || (s.length >= 8 && /^\d+$/.test(s)); 
         };
 
         let finalDisplayName = foundName;
-        let isPhoneDisplay = false;
-
         if (isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone;
-          isPhoneDisplay = true;
         }
-
         if (!finalDisplayName || isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone || 'Sem Nome';
-          isPhoneDisplay = !!foundPhone;
         }
 
-        // Se o nome de exibição for apenas números, formatamos como telefone
         if (/^\d+$/.test(finalDisplayName.replace(/\D/g, '')) && (finalDisplayName.length >= 8)) {
           finalDisplayName = formatPhone(finalDisplayName);
         }
 
         let finalAttendant = undefined;
+        let isRobotTicket = false;
+        
         if (t.id_atendente) {
           const attId = typeof t.id_atendente === 'object' ? t.id_atendente._id : t.id_atendente;
-          finalAttendant = t.id_atendente?.nome || attendantLookup.get(String(attId));
+          const nameFromApi = t.id_atendente?.nome || attendantLookup.get(String(attId));
+          
+          if (nameFromApi && ROBOT_NAMES.some(rName => nameFromApi.includes(rName))) {
+            isRobotTicket = true;
+          }
+          finalAttendant = nameFromApi;
         }
 
         return {
@@ -181,11 +182,9 @@ export const opaService = {
           clientName: String(finalDisplayName).trim(),
           contact: formatPhone(foundPhone),
           waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
-          durationSeconds: (status === 'in_service' || status === 'finished')
-            ? calculateDuration(t.date, t.fim)
-            : 0,
+          durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
-          attendantName: finalAttendant,
+          attendantName: isRobotTicket ? undefined : finalAttendant, // Se for robô, limpamos o nome para não contar no ranking
           department: t.id_motivo_atendimento?.motivo || t.setor?.nome || 'Suporte',
           createdAt: t.date,
           closedAt: t.fim

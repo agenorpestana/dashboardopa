@@ -45,10 +45,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // Cálculo do Ranking
+    // Cálculo do Ranking - Apenas humanos (tickets que possuem attendantName mapeado)
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
-       if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
+       if (t.attendantName) {
+         rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
+       }
     });
     
     const ranking = Object.entries(rankingMap)
@@ -58,7 +60,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
     const topTechnician = ranking.length > 0 ? ranking[0] : null;
 
-    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0);
+    // TMA apenas para finalizados por humanos
+    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0 && t.attendantName);
     const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
     const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
 
