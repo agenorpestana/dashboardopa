@@ -156,17 +156,18 @@ app.get('/api/dashboard-data', async (req, res) => {
     // Identificação do Robô Victor
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // ETAPA 1: BUSCAR ATIVOS
+    // ETAPA 1: BUSCAR ATIVOS (Limitamos a 500 para performance)
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: { status: { $ne: 'F' } },
-      options: { limit: 400, sort: { date: -1 } }
+      options: { limit: 500, sort: { date: -1 } }
     });
 
-    // ETAPA 2: BUSCAR FINALIZADOS
+    // ETAPA 2: BUSCAR FINALIZADOS (Apenas humanos)
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
-        dataInicialAbertura: dateFilter
+        dataInicialAbertura: dateFilter,
+        id_atendente: { $ne: ROBOT_ID }
       },
       options: { limit: 1000, sort: { date: -1 } }
     });
@@ -180,17 +181,21 @@ app.get('/api/dashboard-data', async (req, res) => {
       return Array.isArray(res.data) ? res.data : [];
     };
 
-    // Função de limpeza de Robô
+    // Função rigorosa de limpeza de Robô
     const isRobot = (t) => {
       const attId = typeof t.id_atendente === 'object' ? String(t.id_atendente?._id || '') : String(t.id_atendente || '');
       const attName = typeof t.id_atendente === 'object' ? String(t.id_atendente?.nome || '') : '';
       return attId === ROBOT_ID || attName.toLowerCase().includes('robô') || attName.toLowerCase().includes('robot');
     };
 
-    const activeTickets = getList(activeRes);
-    // Removemos do ranking (finalizados) qualquer traço do robô
-    const finishedTickets = getList(finishedRes).filter(t => !isRobot(t));
+    const rawActive = getList(activeRes);
+    const rawFinished = getList(finishedRes);
+
+    // Filtramos ativos removendo qualquer ticket do robô que possa ter vindo
+    const activeTickets = rawActive.filter(t => !isRobot(t));
+    const finishedTickets = rawFinished.filter(t => !isRobot(t));
     
+    // Filtramos lista de atendentes removendo o robô Victor da lista oficial
     const attendants = getList(userRes).filter(a => {
         const id = String(a._id || a.id);
         const nome = String(a.nome || '');

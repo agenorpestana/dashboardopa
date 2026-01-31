@@ -11,7 +11,7 @@ export interface Ticket {
   status: TicketStatus;
   attendantName?: string;
   department?: string;
-  // Added optional date fields to store creation and completion times for dashboard analytics
+  departmentId?: string; // ID interno do Opa Suite para diagnósticos
   createdAt?: string;
   closedAt?: string;
 }

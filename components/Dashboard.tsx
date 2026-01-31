@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { Ticket, Attendant } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
-import { Clock, Users, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, Trophy, BarChart3, Medal, Star } from 'lucide-react';
+import { Clock, Users, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, Trophy, BarChart3, Medal, Star, ShieldAlert, ListFilter } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
@@ -45,7 +45,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // Cálculo do Ranking - Apenas humanos (tickets que possuem attendantName mapeado)
+    // Mapeamento de Setores x Status para o "Log" solicitado
+    const deptLog: Record<string, { name: string, id: string, bot: number, waiting: number }> = {};
+    tickets.forEach(t => {
+      if (t.status === 'bot' || t.status === 'waiting') {
+        const key = t.departmentId || 'unassigned';
+        if (!deptLog[key]) {
+          deptLog[key] = { name: t.department || 'Desconhecido', id: t.departmentId || 'N/A', bot: 0, waiting: 0 };
+        }
+        if (t.status === 'bot') deptLog[key].bot++;
+        if (t.status === 'waiting') deptLog[key].waiting++;
+      }
+    });
+
+    // Ranking de Atendentes (Mensal)
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) {
@@ -60,8 +73,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
     const topTechnician = ranking.length > 0 ? ranking[0] : null;
 
-    // TMA apenas para finalizados por humanos
-    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0 && t.attendantName);
+    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0);
     const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
     const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
 
@@ -76,7 +88,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       finishedToday: finishedToday.length,
       finishedMonth: finishedMonth.length,
       ranking,
-      topTechnician
+      topTechnician,
+      departmentLog: Object.values(deptLog)
     };
   }, [tickets, attendants]);
 
@@ -90,7 +103,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
           </div>
           <div>
             <h2 className="text-xl font-bold text-white tracking-tight">Painel de Atendimento</h2>
-            <p className="text-slate-400 text-sm">Dados consolidados em tempo real</p>
+            <p className="text-slate-400 text-sm">Dados reais filtrados (Sem Robôs)</p>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
@@ -139,15 +152,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         />
       </div>
 
-      {/* Seção de Ranking Detalhado */}
+      {/* Seção de Ranking e Diagnóstico de Setores */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Gráfico de Ranking */}
         <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-white flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-sky-500" />
               Ranking de Finalizações (Mês)
             </h3>
-            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Top 5 Atendentes</span>
           </div>
           
           <div className="h-[250px] w-full">
@@ -176,43 +190,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
           </div>
         </div>
 
+        {/* Log de Diagnóstico de Setores */}
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg flex flex-col">
-          <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-amber-500" />
-            Líderes de Atendimento
-          </h3>
-          <div className="space-y-4 flex-1">
-            {stats.ranking.length > 0 ? stats.ranking.map((rank, idx) => (
-              <div key={rank.name} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-                idx === 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-900/50 border-slate-700'
-              }`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    idx === 0 ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-400'
-                  }`}>
-                    {idx + 1}
-                  </div>
-                  <span className={`text-sm font-medium ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}`}>
-                    {rank.name}
-                  </span>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-white flex items-center gap-2">
+              <ListFilter className="w-5 h-5 text-amber-500" />
+              Diagnóstico de Setores
+            </h3>
+          </div>
+          <p className="text-[10px] text-slate-500 uppercase mb-4 font-bold">Cruzamento de ID e Status Triagem</p>
+          
+          <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+            {stats.departmentLog.length > 0 ? stats.departmentLog.map((log) => (
+              <div key={log.id} className="bg-slate-900/40 border border-slate-700/50 p-3 rounded-lg">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-bold text-slate-200 truncate max-w-[140px]">{log.name}</span>
+                  <span className="text-[9px] font-mono bg-slate-800 px-1.5 py-0.5 rounded text-slate-500">ID: {log.id}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                   <span className="text-lg font-bold text-white">{rank.count}</span>
-                   <span className="text-[10px] text-slate-500 uppercase">Fins</span>
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <div className="bg-violet-500/10 border border-violet-500/20 py-1 rounded">
+                    <p className="text-[8px] uppercase text-violet-400 font-bold">Bot</p>
+                    <p className="text-sm font-bold text-violet-300">{log.bot}</p>
+                  </div>
+                  <div className="bg-amber-500/10 border border-amber-500/20 py-1 rounded">
+                    <p className="text-[8px] uppercase text-amber-400 font-bold">Espera</p>
+                    <p className="text-sm font-bold text-amber-300">{log.waiting}</p>
+                  </div>
                 </div>
               </div>
             )) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 italic text-sm">
-                Aguardando finalizações do mês...
+              <div className="flex-1 flex items-center justify-center text-slate-600 text-xs italic">
+                Sem dados de triagem no momento
               </div>
             )}
           </div>
-          {stats.topTechnician && (
-            <div className="mt-4 pt-4 border-t border-slate-700 flex items-center gap-2 text-xs text-slate-500">
-               <Medal className="w-4 h-4 text-emerald-500" />
-               <span>Destaque: <strong>{stats.topTechnician.name}</strong></span>
-            </div>
-          )}
+          <div className="mt-4 p-2 bg-sky-500/5 rounded border border-sky-500/10 text-[9px] text-sky-400 leading-tight">
+             Use estes IDs para ajustar os filtros de triagem se necessário.
+          </div>
         </div>
       </div>
 

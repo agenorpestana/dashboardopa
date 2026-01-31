@@ -89,15 +89,13 @@ export const opaService = {
               attName = rawAttName || attendantMap.get(attId);
           }
 
-          // Lógica de Nome: Rigorosa para evitar Protocolo
+          // Lógica de Nome e Telefone
           let clientDisplayName = '';
           const rawName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
           
-          // Se houver um nome e ele NÃO for apenas números longos (indicativo de protocolo ou telefone puro)
-          if (rawName && isNaN(Number(String(rawName).replace(/\s/g, '')))) {
+          if (rawName && isNaN(Number(String(rawName).replace(/\s/g, '').replace(/\D/g, '')))) {
             clientDisplayName = String(rawName);
           } else {
-            // Tenta extrair telefone do canal_cliente ou do próprio campo de nome se for numérico
             const phoneInfo = t.canal_cliente || rawName || '';
             const phonePart = String(phoneInfo).split('@')[0];
             if (phonePart && phonePart.length > 5) {
@@ -106,6 +104,11 @@ export const opaService = {
               clientDisplayName = 'Cliente';
             }
           }
+
+          // Captura ID e Nome do Departamento
+          const deptObj = t.id_motivo_atendimento;
+          const deptId = typeof deptObj === 'object' ? String(deptObj?._id || '') : String(deptObj || '');
+          const deptName = typeof deptObj === 'object' ? String(deptObj?.motivo || '') : 'Geral';
 
           return {
             id: String(t._id || t.id),
@@ -116,13 +119,13 @@ export const opaService = {
             durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
             status,
             attendantName: attName,
-            department: (typeof t.id_motivo_atendimento === 'object' ? t.id_motivo_atendimento?.motivo : undefined) || 'Geral',
+            department: deptName,
+            departmentId: deptId,
             createdAt: t.date,
             closedAt: t.fim
           };
         });
 
-      // Atualiza contagem de chats ativos apenas para humanos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
