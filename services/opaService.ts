@@ -61,13 +61,20 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // LOG DO CHAMADO MAIS RECENTE PARA AUDITORIA DO USUÁRIO
-      if (rawTickets.length > 0) {
-        const sortedByDate = [...rawTickets].sort((a: any, b: any) => 
-          toTimestamp(b.date) - toTimestamp(a.date)
-        );
-        console.log("%c--- INFO: DATA DO CHAMADO MAIS RECENTE RECEBIDO ---", "color: #10b981; font-weight: bold;");
-        console.log("Data:", sortedByDate[0].date, "| Protocolo:", sortedByDate[0].protocolo || sortedByDate[0]._id);
+      // FILTRAR E LOGAR O ÚLTIMO TICKET FINALIZADO (STATUS 'F')
+      const finishedTickets = rawTickets.filter((t: any) => String(t.status).toUpperCase() === 'F');
+      if (finishedTickets.length > 0) {
+        const newestFinished = [...finishedTickets].sort((a: any, b: any) => 
+          toTimestamp(b.fim || b.date) - toTimestamp(a.fim || a.date)
+        )[0];
+        
+        console.log("%c--- AUDITORIA: ÚLTIMO TICKET FINALIZADO RECEBIDO ---", "color: #f59e0b; font-weight: bold;");
+        console.log("Protocolo:", newestFinished.protocolo);
+        console.log("Abertura:", newestFinished.date);
+        console.log("Finalização:", newestFinished.fim || "Não informada");
+        console.log("Total de finalizados no pacote:", finishedTickets.length);
+      } else {
+        console.log("%c--- AVISO: NENHUM TICKET FINALIZADO RECEBIDO NO PACOTE ---", "color: #ef4444; font-weight: bold;");
       }
 
       const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
