@@ -152,28 +152,28 @@ app.get('/api/dashboard-data', async (req, res) => {
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
+    
+    // ID do Robô para exclusão nos finalizados
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    console.log(`[Proxy] Buscando Ativos e Finalizados separadamente...`);
-
-    // ETAPA 1: BUSCAR ATIVOS (STATUS != F)
-    // Alterado: Removemos o filtro de atendente aqui para garantir que a fila (sem atendente) apareça.
+    // ETAPA 1: BUSCAR TUDO QUE ESTÁ ATIVO (CARDS EM TEMPO REAL)
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: { $ne: 'F' }
       },
       options: {
-        limit: 500,
+        limit: 300,
         sort: { date: -1 }
       }
     });
 
-    // ETAPA 2: BUSCAR 1000 FINALIZADOS RECENTES (STATUS == F)
+    // ETAPA 2: BUSCAR FINALIZADOS RECENTES (HISTÓRICO / TMA / RANKING)
+    // Refinamos aqui para garantir que NÃO tragamos tickets do robô ou que ainda sejam BOT
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
         dataInicialAbertura: dateFilter,
-        id_atendente: { $ne: ROBOT_ID }
+        id_atendente: { $ne: ROBOT_ID } // Exclui robô por ID
       },
       options: {
         limit: 1000,
@@ -194,10 +194,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     const finishedTickets = getList(finishedRes);
     const attendants = getList(userRes);
 
-    // Mesclar e retornar
     const allTickets = [...activeTickets, ...finishedTickets];
-
-    console.log(`[Proxy] Ativos: ${activeTickets.length} | Finalizados: ${finishedTickets.length}`);
 
     res.json({
       success: true,

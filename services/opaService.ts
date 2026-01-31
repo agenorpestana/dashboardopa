@@ -16,6 +16,25 @@ function calculateDuration(start: any, end?: any): number {
   return diff > 0 ? diff : 0;
 }
 
+function formatPhone(value: string): string {
+  const cleaned = value.replace(/\D/g, '');
+  // Formato Brasil com DDI (55739...)
+  if (cleaned.startsWith('55') && cleaned.length >= 12) {
+    const ddd = cleaned.substring(2, 4);
+    const part1 = cleaned.length === 13 ? cleaned.substring(4, 9) : cleaned.substring(4, 8);
+    const part2 = cleaned.length === 13 ? cleaned.substring(9) : cleaned.substring(8);
+    return `(${ddd}) ${part1}-${part2}`;
+  }
+  // Formato local sem DDI (739...)
+  if (cleaned.length >= 10 && cleaned.length <= 11) {
+    const ddd = cleaned.substring(0, 2);
+    const part1 = cleaned.length === 11 ? cleaned.substring(2, 7) : cleaned.substring(2, 6);
+    const part2 = cleaned.length === 11 ? cleaned.substring(7) : cleaned.substring(6);
+    return `(${ddd}) ${part1}-${part2}`;
+  }
+  return value;
+}
+
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
   if (s === 'F') return 'finished';
@@ -23,7 +42,6 @@ function determineTicketStatus(t: any): TicketStatus {
   if (s === 'AG' || s === 'A') return 'waiting';
   if (s === 'PS' || s === 'BOT' || s === 'B' || s === 'T') return 'bot';
   
-  // Fallback: se tem atendente humano mas status não é F, está em atendimento
   if (t.id_atendente && s !== 'F') return 'in_service';
   return 'bot'; 
 }
@@ -44,12 +62,6 @@ export const opaService = {
       
       const rawTickets = result.tickets || [];
       const rawAttendants = result.attendants || [];
-
-      console.group("DIAGNÓSTICO OPA SUITE");
-      console.log("Total Tickets Mesclados:", rawTickets.length);
-      const firstActive = rawTickets.find(t => t.status !== 'F');
-      if (firstActive) console.log(">>> EXEMPLO TICKET ATIVO:", firstActive);
-      console.groupEnd();
 
       const attendants: Attendant[] = rawAttendants
         .map((a: any) => ({
@@ -74,25 +86,27 @@ export const opaService = {
               attName = rawAttName || attendantMap.get(attId) || 'Atendente';
           }
 
-          // Lógica de Nome do Cliente Corrigida: Prioriza Nome > Telefone > "Cliente"
-          // NUNCA coloca protocolo aqui.
-          let clientName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
+          // Lógica de Nome: Prioriza nome real. Se não houver, tenta extrair e formatar o telefone.
+          let clientDisplayName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
           
-          // Se não tem nome, tenta extrair o telefone do canal_cliente (ex: 5573998... @c.us)
-          if (!clientName && t.canal_cliente) {
+          if (!clientDisplayName && t.canal_cliente) {
              const phonePart = String(t.canal_cliente).split('@')[0];
              if (phonePart && phonePart.length > 5) {
-                // Formatação básica (Opcional, mas ajuda no visual)
-                clientName = phonePart;
+                clientDisplayName = formatPhone(phonePart);
              }
           }
 
-          if (!clientName) clientName = 'Cliente';
+          // Se o nome for puramente numérico (comum quando o contato não está salvo), formatamos
+          if (clientDisplayName && /^\d+$/.test(clientDisplayName.replace(/\D/g, ''))) {
+            clientDisplayName = formatPhone(clientDisplayName);
+          }
+
+          if (!clientDisplayName) clientDisplayName = 'Cliente';
 
           return {
             id: String(t._id || t.id),
             protocol: String(t.protocolo || 'N/A'),
-            clientName: String(clientName),
+            clientName: String(clientDisplayName),
             contact: t.cliente_fone || t.canal_cliente || '',
             waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
             durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
