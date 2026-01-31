@@ -91,7 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
 
     return {
-      waiting, bot, inService,
+      waiting, bot, inService, finished,
       avgWait: Math.round(avgWait),
       avgService: Math.round(avgService),
       finishedToday: finishedToday.length,
@@ -117,6 +117,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       console.table(periods.map(p => ({ "ID PERÍODO": p._id, "NOME": p.nome, "ATIVO": p.ativo })));
     }
 
+    // LOG DE VERIFICAÇÃO DE DATAS (FINALIZADOS)
+    if (stats.finished.length > 0) {
+      console.log("%c--- DIAGNÓSTICO DE ATENDIMENTOS FINALIZADOS ---", "color: #10b981; font-weight: bold;");
+      const first = stats.finished[0];
+      const last = stats.finished[stats.finished.length - 1];
+      
+      console.log("Total carregado:", stats.finished.length);
+      console.log("Primeiro da lista (Mais recente):", {
+        Protocolo: first.protocol,
+        Abertura: first.createdAt,
+        Fechamento: first.closedAt,
+        Atendente: first.attendantName
+      });
+      console.log("Último da lista (Mais antigo):", {
+        Protocolo: last.protocol,
+        Abertura: last.createdAt,
+        Fechamento: last.closedAt,
+        Atendente: last.attendantName
+      });
+    }
+
     if (stats.detailedLogs.length > 0) {
       console.log("%c--- RESUMO DE TRIAGEM ATIVA ---", "color: #fbbf24; font-weight: bold;");
       console.table(stats.departmentSummary);
@@ -124,9 +145,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       console.table(stats.detailedLogs);
     }
 
-    console.log("%cDICA: O filtro de finalizados agora busca desde o dia 01 com limite de 3000 registros.", "color: #10b981; font-weight: bold;");
+    console.log("%cDICA: Se a data do 'Último da lista' for de meses passados, o filtro por data no Opa Suite pode estar sendo ignorado pela versão da sua API.", "color: #f87171; font-weight: bold;");
     console.groupEnd();
-  }, [departments, periods, stats.detailedLogs, stats.departmentSummary]);
+  }, [departments, periods, stats.detailedLogs, stats.departmentSummary, stats.finished]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
