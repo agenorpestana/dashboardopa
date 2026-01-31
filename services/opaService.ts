@@ -29,13 +29,37 @@ function formatPhone(value: string): string {
   return value;
 }
 
+/**
+ * IDs permitidos para o card "Aguardando Setor" conforme solicitado pelo usuário
+ */
+const WAITING_ROOM_SECTOR_IDS = [
+  '5bf73d1d186f7d2b0d647a60', // Comercial
+  '5bf73d1d186f7d2b0d647a61', // Suporte
+  '5d1624085e74a002308aa25e'  // Financeiro
+];
+
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
+  
+  // 1. Finalizado sempre é prioridade
   if (s === 'F') return 'finished';
+  
+  // 2. Em Atendimento (Humano)
   if (s === 'EA' || s === 'E') return 'in_service';
-  if (s === 'AG' || s === 'A') return 'waiting';
-  if (s === 'PS' || s === 'BOT' || s === 'B' || s === 'T') return 'bot';
+  
+  // Capturar o ID do setor/departamento para validação de triagem
+  const deptObj = t.id_motivo_atendimento || t.id_setor;
+  const deptId = typeof deptObj === 'object' ? String(deptObj?._id || '') : String(deptObj || '');
+
+  // 3. Aguardando Setor (Somente se status for A/AG E o setor for um dos 3 permitidos)
+  if ((s === 'AG' || s === 'A') && WAITING_ROOM_SECTOR_IDS.includes(deptId)) {
+    return 'waiting';
+  }
+  
+  // 4. Se tiver atendente vinculado mas não finalizado, é atendimento ativo
   if (t.id_atendente && s !== 'F') return 'in_service';
+
+  // 5. Restante (Status BOT, PS, ou AG/A em setores não autorizados ou sem setor)
   return 'bot'; 
 }
 
