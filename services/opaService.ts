@@ -40,31 +40,31 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // 1. Dicionário de Nomes e Telefones de Clientes
+      // Dicionários de Nomes e Telefones de Clientes
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
         const id = String(c._id || c.id);
         clientLookup.set(id, {
           name: c.nome || '',
-          phone: c.fone || c.telefone || c.cpf_cnpj || ''
+          phone: c.fone || c.telefone || c.whatsapp || c.celular || c.cpf_cnpj || ''
         });
       });
 
-      // 2. Dicionário de Nomes e Telefones de Contatos
+      // Dicionários de Nomes e Telefones de Contatos
       const contactLookup = new Map<string, {name: string, phone: string}>();
       rawContacts.forEach((c: any) => {
         const id = String(c._id || c.id);
         let phone = '';
         if (c.fones && Array.isArray(c.fones) && c.fones.length > 0) {
-          phone = c.fones[0].numero || '';
+          phone = c.fones[0].numero || c.fones[0].fone || '';
         }
         contactLookup.set(id, {
           name: c.nome || '',
-          phone: phone || c.email_principal || ''
+          phone: phone || c.whatsapp || c.celular || c.email_principal || ''
         });
       });
 
-      // 3. Dicionário de Atendentes (Crucial para Conversas Ativas)
+      // Dicionário de Atendentes
       const attendantLookup = new Map<string, string>();
       const attendants: Attendant[] = rawAttendants.map((a: any) => {
         const id = String(a._id || a.id);
@@ -82,48 +82,58 @@ export const opaService = {
         const protocol = (t.protocolo || '').trim();
         const status = determineTicketStatus(t);
 
-        // --- RESOLUÇÃO DE IDENTIDADE DO CLIENTE ---
+        // --- RESOLUÇÃO DE IDENTIDADE ---
         let foundName = '';
         let foundPhone = '';
 
         const clientId = typeof t.id_cliente === 'object' ? t.id_cliente?._id : t.id_cliente;
         const contactId = typeof t.id_contato === 'object' ? t.id_contato?._id : t.id_contato;
 
-        // Tenta extrair do id_cliente
+        // Tenta buscar nos Mapas
         if (clientId && clientLookup.has(String(clientId))) {
           const info = clientLookup.get(String(clientId))!;
           foundName = info.name;
           foundPhone = info.phone;
         }
 
-        // Tenta extrair do id_contato (se não achou ou se contato for mais específico)
-        if ((!foundName || !foundPhone) && contactId && contactLookup.has(String(contactId))) {
+        if (contactId && contactLookup.has(String(contactId))) {
           const info = contactLookup.get(String(contactId))!;
           if (!foundName) foundName = info.name;
           if (!foundPhone) foundPhone = info.phone;
         }
 
-        // Fallbacks de emergência (campos flat que às vezes a API envia)
-        if (!foundPhone) foundPhone = t.fone || t.contato_fone || t.cliente_fone || '';
-        if (!foundName && t.id_cliente?.nome) foundName = t.id_cliente.nome;
+        // Tenta buscar em propriedades diretas do ticket (algumas versões da API enviam flat)
+        if (!foundName) foundName = t.cliente_nome || t.contato_nome || (t.id_cliente?.nome) || (t.id_contato?.nome) || '';
+        if (!foundPhone) foundPhone = t.cliente_fone || t.contato_fone || (t.id_contato?.fones?.[0]?.numero) || '';
 
-        // Validação: O nome é útil ou é apenas um código/protocolo?
-        const isTrash = (str: string) => {
+        // Validação: O que temos é um nome real ou lixo de sistema?
+        const isSystemJunk = (str: string) => {
+          if (!str) return true;
           const s = str.trim().toUpperCase();
-          return !s || s === 'CLIENTE' || s === 'ANONIMO' || s === protocol.toUpperCase() || /^(ITL|OPA|PRT)\d+/.test(s) || /^\d{10,}$/.test(s);
+          // Detecta padrões ITL, OPA, PRT ou sequências numéricas longas (protocolos)
+          return s === 'CLIENTE' || 
+                 s === 'ANONIMO' || 
+                 s === protocol.toUpperCase() || 
+                 /^(ITL|OPA|PRT)\d+/.test(s) || 
+                 /^\d{10,}$/.test(s);
         };
 
-        // Decisão de Exibição: Nome -> Telefone -> Protocolo
-        let finalName = foundName;
-        if (isTrash(finalName)) {
-          finalName = foundPhone || protocol || 'Cliente';
+        // Decisão Hierárquica: Nome Real -> Telefone -> Protocolo (Último caso)
+        let finalDisplayName = foundName;
+        if (isSystemJunk(finalDisplayName)) {
+          // Se o nome é junk, priorizamos o telefone
+          finalDisplayName = foundPhone;
+          
+          // Se o telefone também for junk ou vazio, aí sim usamos o protocolo
+          if (isSystemJunk(finalDisplayName)) {
+            finalDisplayName = protocol || 'Cliente';
+          }
         }
 
         // --- RESOLUÇÃO DO ATENDENTE ---
         let finalAttendant = undefined;
         if (t.id_atendente) {
           const attId = typeof t.id_atendente === 'object' ? t.id_atendente._id : t.id_atendente;
-          // Se for objeto e tiver nome, usa direto. Se for só ID, usa o lookup.
           finalAttendant = t.id_atendente?.nome || attendantLookup.get(String(attId));
         }
 
@@ -133,7 +143,7 @@ export const opaService = {
         return {
           id: String(t._id || t.id),
           protocol: protocol,
-          clientName: String(finalName).trim(),
+          clientName: String(finalDisplayName).trim(),
           contact: foundPhone,
           waitTimeSeconds: status === 'waiting' ? calculateDuration(dateCreated) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished')
@@ -147,7 +157,7 @@ export const opaService = {
         };
       });
 
-      // Incrementar contagem de chats ativos
+      // Contagem de chats ativos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
@@ -157,7 +167,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro fatal no processamento:", e);
+      console.error("[OpaService] Erro fatal:", e);
       return { tickets: [], attendants: [] };
     }
   }
