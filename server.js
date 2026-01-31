@@ -161,14 +161,14 @@ app.get('/api/dashboard-data', async (req, res) => {
       options: { limit: 500, sort: { date: -1 } }
     });
 
-    // 2. FINALIZADOS
+    // 2. FINALIZADOS (Ajustado para Range $gte e maior limite)
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
-        dataInicialAbertura: dateFilter,
+        dataInicialAbertura: { $gte: dateFilter }, // Alterado para buscar tudo a partir do dia 1
         id_atendente: { $ne: ROBOT_ID }
       },
-      options: { limit: 1000, sort: { date: -1 } }
+      options: { limit: 3000, sort: { date: -1 } } // Limite aumentado para 3000
     });
 
     // 3. USUÁRIOS
@@ -176,9 +176,14 @@ app.get('/api/dashboard-data', async (req, res) => {
       options: { limit: 300 }
     });
 
-    // 4. DEPARTAMENTOS (SETORES) para o log de cruzamento
+    // 4. DEPARTAMENTOS
     const deptRes = await opaRequest(baseUrl, '/departamento', token, {
         options: { limit: 300 }
+    });
+
+    // 5. PERÍODOS (Nova API solicitada para diagnóstico)
+    const periodRes = await opaRequest(baseUrl, '/atendimento/periodo', token, {
+        options: { limit: 100 }
     });
 
     const getList = (res) => {
@@ -195,6 +200,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     const rawActive = getList(activeRes);
     const rawFinished = getList(finishedRes);
     const departments = getList(deptRes);
+    const periods = getList(periodRes);
 
     const activeTickets = rawActive.filter(t => !isRobot(t));
     const finishedTickets = rawFinished.filter(t => !isRobot(t));
@@ -209,7 +215,8 @@ app.get('/api/dashboard-data', async (req, res) => {
       success: true,
       tickets: [...activeTickets, ...finishedTickets],
       attendants: attendants,
-      departments: departments
+      departments: departments,
+      periods: periods // Enviando períodos para log no frontend
     });
 
   } catch (error) { 

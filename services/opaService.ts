@@ -29,9 +29,6 @@ function formatPhone(value: string): string {
   return value;
 }
 
-/**
- * IDs permitidos para o card "Aguardando Setor" conforme solicitado pelo usuário
- */
 const WAITING_ROOM_SECTOR_IDS = [
   '5bf73d1d186f7d2b0d647a60', // Comercial
   '5bf73d1d186f7d2b0d647a61', // Suporte
@@ -40,45 +37,33 @@ const WAITING_ROOM_SECTOR_IDS = [
 
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
-  
-  // 1. Finalizado sempre é prioridade
   if (s === 'F') return 'finished';
-  
-  // 2. Em Atendimento (Humano)
   if (s === 'EA' || s === 'E') return 'in_service';
-  
-  // Capturar o ID do setor/departamento para validação de triagem
   const deptObj = t.id_motivo_atendimento || t.id_setor;
   const deptId = typeof deptObj === 'object' ? String(deptObj?._id || '') : String(deptObj || '');
-
-  // 3. Aguardando Setor (Somente se status for A/AG E o setor for um dos 3 permitidos)
   if ((s === 'AG' || s === 'A') && WAITING_ROOM_SECTOR_IDS.includes(deptId)) {
     return 'waiting';
   }
-  
-  // 4. Se tiver atendente vinculado mas não finalizado, é atendimento ativo
   if (t.id_atendente && s !== 'F') return 'in_service';
-
-  // 5. Restante (Status BOT, PS, ou AG/A em setores não autorizados ou sem setor)
   return 'bot'; 
 }
 
 export const opaService = {
-  fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[], departments: Department[] }> => {
-    if (!config.apiUrl) return { tickets: [], attendants: [], departments: [] };
+  fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[], departments: Department[], periods: any[] }> => {
+    if (!config.apiUrl) return { tickets: [], attendants: [], departments: [], periods: [] };
     
     try {
       const response = await fetch('/api/dashboard-data');
-      if (!response.ok) return { tickets: [], attendants: [], departments: [] };
+      if (!response.ok) return { tickets: [], attendants: [], departments: [], periods: [] };
       
       const result = await response.json();
-      if (!result.success) return { tickets: [], attendants: [], departments: [] };
+      if (!result.success) return { tickets: [], attendants: [], departments: [], periods: [] };
       
       const rawTickets = result.tickets || [];
       const rawAttendants = result.attendants || [];
       const rawDepts = result.departments || [];
+      const rawPeriods = result.periods || [];
 
-      // Mapear Departamentos
       const departments: Department[] = rawDepts.map((d: any) => ({
         id: String(d._id || d.id),
         name: d.nome || 'Sem Nome'
@@ -97,7 +82,6 @@ export const opaService = {
 
       const tickets: Ticket[] = rawTickets.map((t: any) => {
         const status = determineTicketStatus(t);
-        
         const attObj = t.id_atendente;
         const attId = typeof attObj === 'object' ? String(attObj?._id || '') : String(attObj || '');
         const attName = (typeof attObj === 'object' ? String(attObj?.nome || '') : '') || attendantNameMap.get(attId);
@@ -121,8 +105,6 @@ export const opaService = {
           protocol: String(t.protocolo || 'N/A'),
           clientName: clientDisplayName,
           contact: t.cliente_fone || t.canal_cliente || '',
-          // CORREÇÃO: O tempo de espera agora é calculado tanto para quem está na fila (waiting) 
-          // quanto para quem está na triagem inicial (bot).
           waitTimeSeconds: (status === 'waiting' || status === 'bot') ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
@@ -141,10 +123,10 @@ export const opaService = {
         }
       });
 
-      return { tickets, attendants, departments };
+      return { tickets, attendants, departments, periods: rawPeriods };
     } catch (e) {
       console.error("[OpaService] Error:", e);
-      return { tickets: [], attendants: [], departments: [] };
+      return { tickets: [], attendants: [], departments: [], periods: [] };
     }
   }
 };

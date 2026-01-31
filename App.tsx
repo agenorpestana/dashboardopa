@@ -14,6 +14,7 @@ const App: React.FC = () => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [attendants, setAttendants] = useState<Attendant[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [periods, setPeriods] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
@@ -47,6 +48,7 @@ const App: React.FC = () => {
       setTickets(data.tickets);
       setAttendants(data.attendants);
       setDepartments(data.departments);
+      setPeriods(data.periods);
       setLastUpdate(new Date());
     } catch (error) {
       console.error("Failed to fetch dashboard data", error);
@@ -123,7 +125,7 @@ const App: React.FC = () => {
           ) : (
             <>
               {currentView === 'dashboard' && (
-                <Dashboard tickets={tickets} attendants={attendants} departments={departments} />
+                <Dashboard tickets={tickets} attendants={attendants} departments={departments} periods={periods} />
               )}
               {currentView === 'settings' && (
                 <Settings config={config} onSave={handleSaveConfig} />

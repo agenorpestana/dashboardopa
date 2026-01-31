@@ -10,6 +10,7 @@ interface DashboardProps {
   tickets: Ticket[];
   attendants: Attendant[];
   departments: Department[];
+  periods: any[];
 }
 
 const formatTime = (seconds: number) => {
@@ -20,7 +21,7 @@ const formatTime = (seconds: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, departments }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, departments, periods }) => {
   const stats = useMemo(() => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -46,7 +47,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // 1. Resumo por Setor baseado em tickets ativos
     const deptSummary: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
     const detailedLogs: any[] = [];
 
@@ -103,19 +103,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
     };
   }, [tickets, attendants]);
 
-  // Efeito para imprimir todos os logs no F12
   useEffect(() => {
     console.clear();
     console.group("📂 OPA SUITE - MASTER LOG (F12)");
     
-    // LISTA COMPLETA DE SETORES (O que você pediu)
     if (departments.length > 0) {
       console.log("%c--- LISTA COMPLETA DE SETORES (MASTER LIST) ---", "color: #38bdf8; font-weight: bold;");
-      const masterList = departments.map(d => ({ "ID DO SETOR": d.id, "NOME DO SETOR": d.name }));
-      console.table(masterList);
+      console.table(departments.map(d => ({ "ID DO SETOR": d.id, "NOME DO SETOR": d.name })));
     }
 
-    // DIAGNÓSTICO DE TRIAGEM ATUAL
+    if (periods && periods.length > 0) {
+      console.log("%c--- LISTA DE PERÍODOS CONFIGURADOS ---", "color: #a78bfa; font-weight: bold;");
+      console.table(periods.map(p => ({ "ID PERÍODO": p._id, "NOME": p.nome, "ATIVO": p.ativo })));
+    }
+
     if (stats.detailedLogs.length > 0) {
       console.log("%c--- RESUMO DE TRIAGEM ATIVA ---", "color: #fbbf24; font-weight: bold;");
       console.table(stats.departmentSummary);
@@ -123,13 +124,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       console.table(stats.detailedLogs);
     }
 
-    console.log("%cDICA: Use a Master List para conferir IDs de setores que não estão aparecendo na triagem ativa.", "color: #94a3b8; font-style: italic;");
+    console.log("%cDICA: O filtro de finalizados agora busca desde o dia 01 com limite de 3000 registros.", "color: #10b981; font-weight: bold;");
     console.groupEnd();
-  }, [departments, stats.detailedLogs, stats.departmentSummary]);
+  }, [departments, periods, stats.detailedLogs, stats.departmentSummary]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* Header com Médias */}
       <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
         <div className="flex items-center gap-4">
           <div className="bg-sky-500/10 p-3 rounded-lg">
@@ -172,7 +172,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
         </div>
       </div>
 
-      {/* Cartões Principais */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard title="Fila de Espera" value={stats.waiting.length} icon={<Clock className="text-amber-500" />} colorClass="text-amber-500" />
         <StatCard title="Em Triagem" value={stats.bot.length} icon={<Bot className="text-violet-500" />} colorClass="text-violet-500" />
@@ -186,7 +185,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
         />
       </div>
 
-      {/* Gráfico de Ranking */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-bold text-white flex items-center gap-2">
@@ -225,7 +223,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
         </div>
       </div>
 
-      {/* Listas de Atendimento */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <TicketList title="Aguardando Setor" tickets={stats.waiting} type="waiting" />
         <TicketList title="Em Bot / Triagem" tickets={stats.bot} type="bot" />
