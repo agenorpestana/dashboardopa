@@ -136,15 +136,25 @@ app.get('/api/dashboard-data', async (req, res) => {
     const dateLimitStr = dateLimit.toISOString().split('T')[0];
 
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
+    const robotId = '5d1642ad4b16a50312cc8f4d';
 
     const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
+      // Atendimentos ativos (excluindo robô mas mantendo os que estão em fila sem atendente)
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": { "$ne": "F" } },
-        "options": { "limit": 2000, "populate": populate, "sort": "-_id" }
+        "filter": { 
+          "status": { "$ne": "F" },
+          "id_atendente": { "$ne": robotId }
+        },
+        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
       }),
+      // Atendimentos finalizados (excluindo robô para ganhar espaço nos 1000 registros do limite da API)
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": "F", "dataInicialAbertura": dateLimitStr },
-        "options": { "limit": 5000, "populate": populate, "sort": "-_id" } // LIMITE AUMENTADO PARA 5000
+        "filter": { 
+          "status": "F", 
+          "dataInicialAbertura": dateLimitStr,
+          "id_atendente": { "$ne": robotId } // FILTRO DE ROBÔ APLICADO AQUI
+        },
+        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
       }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
         "filter": { "status": "A" },
