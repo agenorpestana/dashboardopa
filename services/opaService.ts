@@ -3,7 +3,7 @@ import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
 
 function toTimestamp(dateVal: any): number {
   if (!dateVal) return 0;
-  const ts = Date.parse(String(dateVal));
+  const ts = Date.parse(String(dateVal).replace(' ', 'T'));
   return isNaN(ts) ? 0 : ts;
 }
 
@@ -18,9 +18,9 @@ function calculateDuration(start: any, end?: any): number {
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
   if (s === 'F') return 'finished';
-  if (s === 'EA') return 'in_service';
-  if (s === 'AG') return 'waiting';
-  if (s === 'PS' || s === 'BOT') return 'bot';
+  if (s === 'EA' || s === 'E') return 'in_service';
+  if (s === 'AG' || s === 'A') return 'waiting';
+  if (s === 'PS' || s === 'BOT' || s === 'B') return 'bot';
   if (t.id_atendente) return 'in_service';
   if (t.setor) return 'waiting';
   return 'bot'; 
@@ -28,7 +28,7 @@ function determineTicketStatus(t: any): TicketStatus {
 
 function formatPhone(phone: string): string {
   if (!phone) return '';
-  let cleaned = phone.replace(/\D/g, '');
+  let cleaned = String(phone).replace(/\D/g, '');
   if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
     cleaned = cleaned.substring(2);
   }
@@ -53,13 +53,23 @@ export const opaService = {
     
     try {
       const response = await fetch('/api/dashboard-data');
-      if (!response.ok) return { tickets: [], attendants: [] };
+      if (!response.ok) {
+        console.error("[OpaService] Erro na resposta da API interna");
+        return { tickets: [], attendants: [] };
+      }
+      
       const result = await response.json();
+      if (!result.success) {
+        console.error("[OpaService] API retornou erro:", result.error);
+        return { tickets: [], attendants: [] };
+      }
       
       const rawTickets = result.tickets || [];
       const rawAttendants = result.attendants || [];
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
+
+      console.log(`[OpaService] Processando ${rawTickets.length} tickets totais.`);
 
       // AUDITORIA DE FINALIZADOS
       const finishedTickets = rawTickets.filter((t: any) => String(t.status).toUpperCase() === 'F');
@@ -74,12 +84,10 @@ export const opaService = {
         console.log("Total no Pacote:", finishedTickets.length);
         console.log("Mais RECENTE:", newest.fim || newest.date, `(Prot: ${newest.protocolo})`);
         console.log("Mais ANTIGO:", oldest.fim || oldest.date, `(Prot: ${oldest.protocolo})`);
-      } else {
-        console.log("%c--- AVISO: NENHUM TICKET FINALIZADO RECEBIDO ---", "color: #ef4444; font-weight: bold;");
       }
 
       const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
-      const ROBOT_NAMES = ["Victor (Robô de Adentimento)", "Victor"];
+      const ROBOT_NAMES = ["Victor (Robô de Adentimento)", "Victor", "Robô", "Bot"];
 
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
@@ -153,7 +161,7 @@ export const opaService = {
 
         const isJunk = (str: string) => {
           if (!str) return true;
-          const s = str.trim().toUpperCase();
+          const s = String(str).trim().toUpperCase();
           const p = protocol.toUpperCase();
           return s === 'CLIENTE' || s === 'ANONIMO' || s === 'NULL' || s === 'WHATSAPP USER' ||
                  s === p || s.includes(p) || /^(ITL|OPA|PRT)/.test(s) || (s.length >= 8 && /^\d+$/.test(s)); 
@@ -167,8 +175,8 @@ export const opaService = {
           finalDisplayName = foundPhone || 'Sem Nome';
         }
 
-        if (/^\d+$/.test(finalDisplayName.replace(/\D/g, '')) && (finalDisplayName.length >= 8)) {
-          finalDisplayName = formatPhone(finalDisplayName);
+        if (/^\d+$/.test(String(finalDisplayName).replace(/\D/g, '')) && (String(finalDisplayName).length >= 8)) {
+          finalDisplayName = formatPhone(String(finalDisplayName));
         }
 
         let finalAttendant = undefined;
@@ -210,7 +218,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro:", e);
+      console.error("[OpaService] Erro fatal:", e);
       return { tickets: [], attendants: [] };
     }
   }

@@ -44,7 +44,7 @@ async function initDB() {
       await connection.query('INSERT INTO users (username, password_hash) VALUES (?, ?)', ['suporte', hash]);
     }
     connection.release();
-  } catch (error) { console.error(error); }
+  } catch (error) { console.error("Erro ao inicializar banco:", error.message); }
 }
 initDB();
 
@@ -52,21 +52,26 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-// Função de requisição otimizada para o padrão de filtros do Opa Suite
+/**
+ * Função de requisição para o Opa Suite (Padrão Loopback)
+ */
 function opaRequest(baseUrl, path, token, params = {}) {
   return new Promise((resolve) => {
     try {
       const url = new URL(`${baseUrl}${path}`);
       
-      // O Opa Suite espera um único objeto "filter" contendo everything
+      // O Opa Suite usa o padrão Loopback. 
+      // Em versões mais antigas, "populate" deve ser "include"
+      // e operadores como "$ne" devem ser "neq"
       const loopbackFilter = {
         where: params.filter || {},
         limit: params.options?.limit || 1000,
         skip: params.options?.skip || 0,
-        // Converte "-_id" para "_id DESC" ou usa o padrão
         order: params.options?.sort ? 
           (params.options.sort.startsWith('-') ? `${params.options.sort.substring(1)} DESC` : `${params.options.sort} ASC`) : 
           "_id DESC",
+        // Tenta usar tanto include quanto populate para máxima compatibilidade
+        include: params.options?.populate || [],
         populate: params.options?.populate || []
       };
 
@@ -91,20 +96,28 @@ function opaRequest(baseUrl, path, token, params = {}) {
         res.on('end', () => {
           try { 
             const parsed = JSON.parse(data);
-            // Se houver erro na resposta da API
             if (res.statusCode >= 400) {
-                console.error(`[OpaAPI Error ${res.statusCode}]`, parsed);
-                resolve({ ok: false, error: parsed });
+                console.error(`[OpaAPI Error ${res.statusCode}] em ${path}:`, JSON.stringify(parsed).substring(0, 200));
+                resolve({ ok: false, error: parsed, status: res.statusCode });
             } else {
                 resolve({ ok: true, data: parsed }); 
             }
           }
-          catch (e) { resolve({ ok: false, error: 'JSON Parse Error' }); }
+          catch (e) { 
+            console.error(`[OpaAPI Parse Error] em ${path}:`, data.substring(0, 100));
+            resolve({ ok: false, error: 'JSON Parse Error' }); 
+          }
         });
       });
-      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      req.on('error', (e) => {
+        console.error(`[OpaAPI Conn Error] em ${path}:`, e.message);
+        resolve({ ok: false, error: e.message });
+      });
       req.end();
-    } catch (e) { resolve({ ok: false, error: e.message }); }
+    } catch (e) { 
+      console.error(`[OpaAPI Internal Error]`, e.message);
+      resolve({ ok: false, error: e.message }); 
+    }
   });
 }
 
@@ -146,7 +159,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
     // @ts-ignore
     const config = rows[0];
-    if (!config) return res.status(400).json({ error: 'Config missing' });
+    if (!config || !config.api_url) return res.status(400).json({ error: 'URL da API não configurada' });
     
     const baseUrl = config.api_url.replace(/\/$/, '');
     const token = config.api_token;
@@ -154,22 +167,24 @@ app.get('/api/dashboard-data', async (req, res) => {
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
     const robotId = '5d1642ad4b16a50312cc8f4d';
 
-    // Buscamos em paralelo usando a nova estrutura de filtro unificado
+    console.log(`[Dashboard] Iniciando coleta de dados em: ${baseUrl}`);
+
+    // Nota: Mudamos "$ne" para "neq" para maior compatibilidade com Loopback
     const [activeRes, h1, h2, h3, uRes, clientRes, contactRes] = await Promise.all([
       opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: { "$ne": "F" }, id_atendente: { "$ne": robotId } },
+        filter: { status: { "neq": "F" }, id_atendente: { "neq": robotId } },
         options: { limit: 1000, populate: populate, sort: "-_id" }
       }),
       opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: "F", id_atendente: { "$ne": robotId } },
+        filter: { status: "F", id_atendente: { "neq": robotId } },
         options: { limit: 1000, populate: populate, sort: "-_id" }
       }),
       opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: "F", id_atendente: { "$ne": robotId } },
+        filter: { status: "F", id_atendente: { "neq": robotId } },
         options: { limit: 1000, skip: 1000, populate: populate, sort: "-_id" }
       }),
       opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: "F", id_atendente: { "$ne": robotId } },
+        filter: { status: "F", id_atendente: { "neq": robotId } },
         options: { limit: 1000, skip: 2000, populate: populate, sort: "-_id" }
       }),
       opaRequest(baseUrl, '/api/v1/usuario', token, {
@@ -184,27 +199,34 @@ app.get('/api/dashboard-data', async (req, res) => {
       })
     ]);
 
-    const getList = (res) => {
-      if (!res.ok) return [];
-      // No Opa Suite v1, os dados vem em res.data.data ou direto no res.data
+    const getList = (res, name) => {
+      if (!res.ok) {
+        console.warn(`[Dashboard] Falha ao obter ${name}:`, res.error);
+        return [];
+      }
       const data = res.data;
-      if (data && data.data) return data.data;
-      if (Array.isArray(data)) return data;
-      return [];
+      const list = data?.data || (Array.isArray(data) ? data : []);
+      console.log(`[Dashboard] ${name} coletados: ${list.length}`);
+      return list;
     };
 
-    const activeList = getList(activeRes);
-    const historyList = [...getList(h1), ...getList(h2), ...getList(h3)];
+    const activeList = getList(activeRes, "Ativos");
+    const h1List = getList(h1, "Histórico P1");
+    const h2List = getList(h2, "Histórico P2");
+    const h3List = getList(h3, "Histórico P3");
+    
+    const historyList = [...h1List, ...h2List, ...h3List];
 
     res.json({
       success: true,
       tickets: [...activeList, ...historyList],
-      attendants: getList(uRes),
-      clients: getList(clientRes),
-      contacts: getList(contactRes)
+      attendants: getList(uRes, "Atendentes"),
+      clients: getList(clientRes, "Clientes"),
+      contacts: getList(contactRes, "Contatos")
     });
 
   } catch (error) { 
+    console.error(`[Dashboard Fatal Error]`, error.message);
     res.status(500).json({ error: error.message }); 
   }
 });
