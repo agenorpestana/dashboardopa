@@ -61,20 +61,21 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // FILTRAR E LOGAR O ÚLTIMO TICKET FINALIZADO (STATUS 'F')
+      // AUDITORIA DE FINALIZADOS
       const finishedTickets = rawTickets.filter((t: any) => String(t.status).toUpperCase() === 'F');
       if (finishedTickets.length > 0) {
-        const newestFinished = [...finishedTickets].sort((a: any, b: any) => 
+        const sorted = [...finishedTickets].sort((a: any, b: any) => 
           toTimestamp(b.fim || b.date) - toTimestamp(a.fim || a.date)
-        )[0];
+        );
+        const newest = sorted[0];
+        const oldest = sorted[sorted.length - 1];
         
-        console.log("%c--- AUDITORIA: ÚLTIMO TICKET FINALIZADO RECEBIDO ---", "color: #f59e0b; font-weight: bold;");
-        console.log("Protocolo:", newestFinished.protocolo);
-        console.log("Abertura:", newestFinished.date);
-        console.log("Finalização:", newestFinished.fim || "Não informada");
-        console.log("Total de finalizados no pacote:", finishedTickets.length);
+        console.log("%c--- AUDITORIA DE FINALIZADOS ---", "color: #f59e0b; font-weight: bold;");
+        console.log("Total no Pacote:", finishedTickets.length);
+        console.log("Mais RECENTE:", newest.fim || newest.date, `(Prot: ${newest.protocolo})`);
+        console.log("Mais ANTIGO:", oldest.fim || oldest.date, `(Prot: ${oldest.protocolo})`);
       } else {
-        console.log("%c--- AVISO: NENHUM TICKET FINALIZADO RECEBIDO NO PACOTE ---", "color: #ef4444; font-weight: bold;");
+        console.log("%c--- AVISO: NENHUM TICKET FINALIZADO RECEBIDO ---", "color: #ef4444; font-weight: bold;");
       }
 
       const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';

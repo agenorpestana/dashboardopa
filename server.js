@@ -140,15 +140,15 @@ app.get('/api/dashboard-data', async (req, res) => {
     const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
-        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
+        "options": { "limit": 2000, "populate": populate, "sort": "-_id" }
       }),
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": "F", "dataInicialAbertura": dateLimitStr },
-        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
+        "options": { "limit": 5000, "populate": populate, "sort": "-_id" } // LIMITE AUMENTADO PARA 5000
       }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
         "filter": { "status": "A" },
-        "options": { "limit": 100 }
+        "options": { "limit": 200 }
       }),
       requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, {
         "options": { "limit": 1000, "sort": "-_id" }
