@@ -121,7 +121,9 @@ export const opaService = {
           protocol: String(t.protocolo || 'N/A'),
           clientName: clientDisplayName,
           contact: t.cliente_fone || t.canal_cliente || '',
-          waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
+          // CORREÇÃO: O tempo de espera agora é calculado tanto para quem está na fila (waiting) 
+          // quanto para quem está na triagem inicial (bot).
+          waitTimeSeconds: (status === 'waiting' || status === 'bot') ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
           attendantName: attName,
