@@ -74,7 +74,7 @@ async function opaRequest(baseUrl, path, token, body = {}) {
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         rejectUnauthorized: false,
-        timeout: 45000 // Aumentado timeout para grandes volumes
+        timeout: 60000 
       };
 
       const req = lib.request(options, (res) => {
@@ -107,6 +107,49 @@ async function opaRequest(baseUrl, path, token, body = {}) {
       resolve({ ok: false, error: e.message }); 
     }
   });
+}
+
+/**
+ * Função para buscar dados com paginação automática
+ */
+async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords = 10000) {
+  let allData = [];
+  let skip = 0;
+  const limit = 1000;
+  let hasMore = true;
+
+  while (hasMore && allData.length < maxRecords) {
+    console.log(`Buscando bloco: ${skip} até ${skip + limit}...`);
+    const res = await opaRequest(baseUrl, path, token, {
+      filter,
+      options: { 
+        limit, 
+        skip, 
+        sort: { date: -1 },
+        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
+      }
+    });
+
+    if (!res.ok) {
+      console.error(`Erro na paginação no skip ${skip}:`, res.error);
+      break;
+    }
+
+    const data = (res.data?.status === "success") ? (res.data.data || []) : (Array.isArray(res.data) ? res.data : []);
+    
+    if (data.length === 0) {
+      hasMore = false;
+    } else {
+      allData = allData.concat(data);
+      if (data.length < limit) {
+        hasMore = false;
+      } else {
+        skip += limit;
+      }
+    }
+  }
+
+  return allData;
 }
 
 app.post('/api/login', async (req, res) => {
@@ -156,25 +199,24 @@ app.get('/api/dashboard-data', async (req, res) => {
     
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // 1. ATIVOS (Limite menor pois são poucos)
+    // 1. ATIVOS (Normalmente não passam de 1000, busca simples)
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: { status: { $ne: 'F' } },
       options: { limit: 1000, sort: { date: -1 } }
     });
 
-    // 2. FINALIZADOS (Limite alto e projeção de campos)
-    const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
-      filter: {
+    // 2. FINALIZADOS (PAGINADOS para buscar todo o mês)
+    const finishedTicketsRaw = await fetchAllWithPagination(
+      baseUrl, 
+      '/atendimento', 
+      token, 
+      {
         status: 'F',
         date: { $gte: dateFilter }, 
         id_atendente: { $ne: ROBOT_ID }
       },
-      options: { 
-        limit: 15000, // Limite aumentado drasticamente
-        sort: { date: -1 }, // Garantir que venham os mais recentes primeiro se estourar o limite
-        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
-      }
-    });
+      15000 // Limite de segurança para não exceder memória
+    );
 
     // 3. USUÁRIOS
     const userRes = await opaRequest(baseUrl, '/usuario', token, {
@@ -192,8 +234,8 @@ app.get('/api/dashboard-data', async (req, res) => {
     });
 
     const getList = (res) => {
-      if (res.ok && res.data?.status === "success") return res.data.data || [];
-      if (res.ok && Array.isArray(res.data)) return res.data;
+      if (res && res.ok && res.data?.status === "success") return res.data.data || [];
+      if (res && res.ok && Array.isArray(res.data)) return res.data;
       return [];
     };
 
@@ -210,7 +252,8 @@ app.get('/api/dashboard-data', async (req, res) => {
     };
 
     const rawActive = getList(activeRes).sort(sortByDateDesc);
-    const rawFinished = getList(finishedRes).sort(sortByDateDesc);
+    const rawFinished = finishedTicketsRaw.sort(sortByDateDesc);
+    
     const departments = getList(deptRes);
     const periods = getList(periodRes);
 
@@ -225,7 +268,7 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     res.json({
       success: true,
-      ticketsCount: { active: activeTickets.length, finished: finishedTickets.length },
+      pagination: { totalFetched: finishedTickets.length },
       tickets: [...activeTickets, ...finishedTickets],
       attendants: attendants,
       departments: departments,

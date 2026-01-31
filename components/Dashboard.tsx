@@ -112,11 +112,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       console.table(departments.map(d => ({ "ID DO SETOR": d.id, "NOME DO SETOR": d.name })));
     }
 
-    if (periods && periods.length > 0) {
-      console.log("%c--- LISTA DE PERÍODOS CONFIGURADOS ---", "color: #a78bfa; font-weight: bold;");
-      console.table(periods.map(p => ({ "ID PERÍODO": p._id, "NOME": p.nome, "ATIVO": p.ativo })));
-    }
-
     if (stats.finished.length > 0) {
       console.log("%c--- DIAGNÓSTICO DE ATENDIMENTOS FINALIZADOS ---", "color: #10b981; font-weight: bold;");
       
@@ -128,7 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       const newest = ticketsWithTS.reduce((prev, curr) => prev.ts > curr.ts ? prev : curr);
       const oldest = ticketsWithTS.reduce((prev, curr) => prev.ts < curr.ts ? prev : curr);
       
-      console.log("Total carregado:", stats.finished.length);
+      console.log("%cTotal de registros recebidos (Paginados):", "font-weight: bold; color: #38bdf8;", stats.finished.length);
       console.log("%cChamado MAIS RECENTE detectado:", "color: #34d399;", {
         Protocolo: newest.protocol,
         Abertura: newest.createdAt,
@@ -141,8 +136,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
         Fechamento: oldest.closedAt,
         Atendente: oldest.attendantName
       });
-      
-      console.log("Posição 0 do array (Deve ser o mais recente):", stats.finished[0].protocol, stats.finished[0].createdAt);
     }
 
     if (stats.detailedLogs.length > 0) {
