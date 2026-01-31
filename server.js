@@ -135,30 +135,24 @@ app.get('/api/dashboard-data', async (req, res) => {
     dateLimit.setDate(dateLimit.getDate() - 7);
     const dateLimitStr = dateLimit.toISOString().split('T')[0];
 
-    // Populate Fields
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
 
     const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
-      // Atendimentos Ativos
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": { "$ne": "F" } },
-        "options": { "limit": 500, "populate": populate }
+        "options": { "limit": 500, "populate": populate, "sort": "-_id" }
       }),
-      // Histórico Recente
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
         "filter": { "status": "F", "dataInicialAbertura": dateLimitStr },
-        "options": { "limit": 500, "populate": populate }
+        "options": { "limit": 500, "populate": populate, "sort": "-_id" } // ADICIONADO SORT AQUI
       }),
-      // Usuários
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
         "filter": { "status": "A" },
         "options": { "limit": 100 }
       }),
-      // Clientes (Para cruzamento de nome)
       requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, {
         "options": { "limit": 1000, "sort": "-_id" }
       }),
-      // Contatos (Para cruzamento de nome)
       requestWithBody(`${baseUrl}/api/v1/contato`, 'GET', token, {
         "options": { "limit": 1000, "sort": "-_id" }
       })

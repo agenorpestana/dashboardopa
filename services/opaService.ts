@@ -26,17 +26,12 @@ function determineTicketStatus(t: any): TicketStatus {
   return 'bot'; 
 }
 
-/**
- * Formata números de telefone para o padrão brasileiro
- */
 function formatPhone(phone: string): string {
   if (!phone) return '';
   let cleaned = phone.replace(/\D/g, '');
-  
   if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
     cleaned = cleaned.substring(2);
   }
-
   if (cleaned.length === 11) {
     return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
   }
@@ -49,7 +44,6 @@ function formatPhone(phone: string): string {
   if (cleaned.length === 8) {
     return `${cleaned.substring(0, 4)}-${cleaned.substring(4)}`;
   }
-
   return phone;
 }
 
@@ -67,7 +61,15 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // DADOS DO ROBÔ PARA EXCLUSÃO
+      // LOG DO CHAMADO MAIS RECENTE PARA AUDITORIA DO USUÁRIO
+      if (rawTickets.length > 0) {
+        const sortedByDate = [...rawTickets].sort((a: any, b: any) => 
+          toTimestamp(b.date) - toTimestamp(a.date)
+        );
+        console.log("%c--- INFO: DATA DO CHAMADO MAIS RECENTE RECEBIDO ---", "color: #10b981; font-weight: bold;");
+        console.log("Data:", sortedByDate[0].date, "| Protocolo:", sortedByDate[0].protocolo || sortedByDate[0]._id);
+      }
+
       const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
       const ROBOT_NAMES = ["Victor (Robô de Adentimento)", "Victor"];
 
@@ -93,7 +95,6 @@ export const opaService = {
         .filter((a: any) => {
           const id = String(a._id || a.id);
           const name = String(a.nome || '');
-          // Filtra o robô pelo ID exato ou pelo nome
           return id !== ROBOT_ID && !ROBOT_NAMES.some(rName => name.includes(rName));
         })
         .map((a: any) => {
@@ -158,7 +159,6 @@ export const opaService = {
           finalDisplayName = foundPhone || 'Sem Nome';
         }
 
-        // Formatação de telefone no nome se for puramente numérico
         if (/^\d+$/.test(finalDisplayName.replace(/\D/g, '')) && (finalDisplayName.length >= 8)) {
           finalDisplayName = formatPhone(finalDisplayName);
         }
@@ -186,14 +186,13 @@ export const opaService = {
           waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
-          attendantName: isRobot ? undefined : finalAttendant, // Se for robô, remove o nome do atendente deste ticket
+          attendantName: isRobot ? undefined : finalAttendant,
           department: t.id_motivo_atendimento?.motivo || t.setor?.nome || 'Suporte',
           createdAt: t.date,
           closedAt: t.fim
         };
       });
 
-      // Contabiliza chats ativos apenas para humanos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
