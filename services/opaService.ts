@@ -40,18 +40,15 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // Dicionário de Clientes
+      // Mapeamento de Clientes
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
         const id = String(c._id || c.id);
         const phone = c.fone || c.telefone || c.whatsapp || c.celular || '';
-        clientLookup.set(id, {
-          name: c.nome || '',
-          phone: phone
-        });
+        clientLookup.set(id, { name: c.nome || '', phone });
       });
 
-      // Dicionário de Contatos
+      // Mapeamento de Contatos
       const contactLookup = new Map<string, {name: string, phone: string}>();
       rawContacts.forEach((c: any) => {
         const id = String(c._id || c.id);
@@ -59,13 +56,9 @@ export const opaService = {
         if (!phone && c.fones && Array.isArray(c.fones) && c.fones.length > 0) {
           phone = c.fones[0].numero || c.fones[0].fone || '';
         }
-        contactLookup.set(id, {
-          name: c.nome || '',
-          phone: phone
-        });
+        contactLookup.set(id, { name: c.nome || '', phone });
       });
 
-      // Dicionário de Atendentes
       const attendantLookup = new Map<string, string>();
       const attendants: Attendant[] = rawAttendants.map((a: any) => {
         const id = String(a._id || a.id);
@@ -83,14 +76,12 @@ export const opaService = {
         const protocol = (t.protocolo || '').trim();
         const status = determineTicketStatus(t);
 
-        // --- RESOLUÇÃO DE IDENTIDADE ---
         let foundName = '';
         let foundPhone = '';
 
         const clientId = typeof t.id_cliente === 'object' ? t.id_cliente?._id : t.id_cliente;
         const contactId = typeof t.id_contato === 'object' ? t.id_contato?._id : t.id_contato;
 
-        // 1. Busca nos mapas de cache
         if (clientId && clientLookup.has(String(clientId))) {
           const info = clientLookup.get(String(clientId))!;
           foundName = info.name;
@@ -103,67 +94,64 @@ export const opaService = {
           if (!foundPhone) foundPhone = info.phone;
         }
 
-        // 2. Fallback para dados diretos no ticket
+        // Fallback direto do objeto populado caso o lookup falhe
         if (!foundName || foundName.toUpperCase() === 'CLIENTE') {
-          foundName = t.cliente_nome || t.contato_nome || t.id_cliente?.nome || t.id_contato?.nome || '';
+          foundName = t.id_cliente?.nome || t.id_contato?.nome || t.cliente_nome || '';
         }
         if (!foundPhone) {
-          foundPhone = t.cliente_fone || t.contato_fone || t.id_contato?.fones?.[0]?.numero || '';
+          foundPhone = t.id_contato?.fones?.[0]?.numero || t.cliente_fone || '';
         }
 
-        // 3. Validação de Junk (Protocolos ou nomes vazios)
+        // Função para validar se o que temos é um nome real ou apenas lixo de sistema/protocolo
         const isJunk = (str: string) => {
           if (!str) return true;
           const s = str.trim().toUpperCase();
+          const p = protocol.toUpperCase();
           return s === 'CLIENTE' || 
                  s === 'ANONIMO' || 
-                 s === protocol.toUpperCase() || 
-                 /^(ITL|OPA|PRT)\d+/.test(s) || 
-                 (s.length >= 10 && /^\d+$/.test(s));
+                 s === 'NULL' ||
+                 s === p || 
+                 s.includes(p) ||
+                 /^(ITL|OPA|PRT)/.test(s) || // Padrões de protocolo
+                 (s.length >= 8 && /^\d+$/.test(s)); // IDs numéricos longos
         };
 
-        // --- LÓGICA FINAL DE EXIBIÇÃO ---
-        // Prioridade: NOME REAL -> TELEFONE
+        // --- LÓGICA DE EXIBIÇÃO FINAL ---
+        // Prioridade 1: Nome Real (Se não for junk)
+        // Prioridade 2: Telefone (Se nome for junk)
         let finalDisplayName = foundName;
-        
-        // Se o nome é junk ou "Cliente", usamos o telefone
         if (isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone;
         }
 
-        // Se mesmo assim estiver vazio (raro no WhatsApp), usamos um traço ou espaço, mas evitamos o protocolo
+        // Se após tudo ainda for inválido, forçamos o telefone disponível (WhatsApp)
         if (!finalDisplayName || isJunk(finalDisplayName)) {
-          finalDisplayName = foundPhone || 'Sem Identificação';
+          finalDisplayName = foundPhone || 'WhatsApp User';
         }
 
-        // --- RESOLUÇÃO DO ATENDENTE ---
         let finalAttendant = undefined;
         if (t.id_atendente) {
           const attId = typeof t.id_atendente === 'object' ? t.id_atendente._id : t.id_atendente;
           finalAttendant = t.id_atendente?.nome || attendantLookup.get(String(attId));
         }
 
-        const dateCreated = t.date; 
-        const dateFinished = t.fim;
-
         return {
           id: String(t._id || t.id),
-          protocol: protocol,
+          protocol,
           clientName: String(finalDisplayName).trim(),
           contact: foundPhone,
-          waitTimeSeconds: status === 'waiting' ? calculateDuration(dateCreated) : 0,
+          waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished')
-            ? calculateDuration(dateCreated, dateFinished)
+            ? calculateDuration(t.date, t.fim)
             : 0,
           status,
           attendantName: finalAttendant,
           department: t.id_motivo_atendimento?.motivo || t.setor?.nome || 'Suporte',
-          createdAt: dateCreated,
-          closedAt: dateFinished
+          createdAt: t.date,
+          closedAt: t.fim
         };
       });
 
-      // Contagem de chats ativos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
@@ -173,7 +161,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Erro fatal:", e);
+      console.error("[OpaService] Erro:", e);
       return { tickets: [], attendants: [] };
     }
   }

@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { Ticket, Attendant } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
-import { Clock, Users, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, Trophy, BarChart3, Medal } from 'lucide-react';
+import { Clock, Users, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, Trophy, BarChart3, Medal, Star } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
@@ -45,22 +45,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
+    // Cálculo do Ranking
+    const rankingMap: Record<string, number> = {};
+    finishedMonth.forEach(t => {
+       if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
+    });
+    
+    const ranking = Object.entries(rankingMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const topTechnician = ranking.length > 0 ? ranking[0] : null;
+
     const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0);
     const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
     const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
 
     const totalWait = waiting.reduce((acc, curr) => acc + curr.waitTimeSeconds, 0);
     const avgWait = waiting.length > 0 ? totalWait / waiting.length : 0;
-
-    // Cálculo do Ranking
-    const rankingMap: Record<string, number> = {};
-    finishedMonth.forEach(t => {
-       if (t.attendantName) rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
-    });
-    const ranking = Object.entries(rankingMap)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
 
     return {
       waiting, bot, inService,
@@ -69,7 +72,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       avgService: Math.round(avgService),
       finishedToday: finishedToday.length,
       finishedMonth: finishedMonth.length,
-      ranking
+      ranking,
+      topTechnician
     };
   }, [tickets, attendants]);
 
@@ -82,8 +86,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
             <Activity className="w-6 h-6 text-sky-400" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white tracking-tight">Monitoramento Geral</h2>
-            <p className="text-slate-400 text-sm">Operação em tempo real</p>
+            <h2 className="text-xl font-bold text-white tracking-tight">Painel de Atendimento</h2>
+            <p className="text-slate-400 text-sm">Dados consolidados em tempo real</p>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
@@ -102,14 +106,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
             </div>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Hoje)</p>
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Hoje</p>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
               <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
             </div>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Finalizados (Mês)</p>
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Mês Atual</p>
             <div className="flex items-center gap-2">
               <CalendarCheck className="w-4 h-4 text-violet-400" />
               <p className="text-lg font-mono font-bold text-violet-400">{stats.finishedMonth}</p>
@@ -123,18 +127,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         <StatCard title="Fila de Espera" value={stats.waiting.length} icon={<Clock className="text-amber-500" />} colorClass="text-amber-500" />
         <StatCard title="Em Triagem" value={stats.bot.length} icon={<Bot className="text-violet-500" />} colorClass="text-violet-500" />
         <StatCard title="Atendimentos" value={stats.inService.length} icon={<Headset className="text-sky-500" />} colorClass="text-sky-500" />
-        <StatCard title="Atendentes Online" value={stats.onlineCount} icon={<Users className="text-emerald-500" />} colorClass="text-emerald-500" />
+        <StatCard 
+          title="Técnico Destaque" 
+          value={stats.topTechnician ? stats.topTechnician.count : 0} 
+          icon={<Star className="text-amber-400" />} 
+          colorClass="text-amber-400"
+          trend={stats.topTechnician ? stats.topTechnician.name : 'Nenhum finalizado'}
+        />
       </div>
 
-      {/* Seção de Ranking de Técnicos */}
+      {/* Seção de Ranking Detalhado */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-white flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-sky-500" />
-              Performance dos Atendentes (Mês)
+              Ranking de Finalizações (Mês)
             </h3>
-            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Top 5 Performance</span>
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Top 5 Atendentes</span>
           </div>
           
           <div className="h-[250px] w-full">
@@ -166,7 +176,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg flex flex-col">
           <h3 className="font-bold text-white mb-6 flex items-center gap-2">
             <Trophy className="w-5 h-5 text-amber-500" />
-            Top Técnicos
+            Líderes de Atendimento
           </h3>
           <div className="space-y-4 flex-1">
             {stats.ranking.length > 0 ? stats.ranking.map((rank, idx) => (
@@ -190,14 +200,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
               </div>
             )) : (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-500 italic text-sm">
-                Nenhum atendimento finalizado este mês
+                Aguardando finalizações do mês...
               </div>
             )}
           </div>
-          {stats.ranking.length > 0 && (
+          {stats.topTechnician && (
             <div className="mt-4 pt-4 border-t border-slate-700 flex items-center gap-2 text-xs text-slate-500">
                <Medal className="w-4 h-4 text-emerald-500" />
-               <span>O atendente <strong>{stats.ranking[0].name}</strong> lidera o ranking!</span>
+               <span>Destaque: <strong>{stats.topTechnician.name}</strong></span>
             </div>
           )}
         </div>
