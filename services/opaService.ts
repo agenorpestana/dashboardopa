@@ -23,7 +23,7 @@ function determineTicketStatus(t: any): TicketStatus {
   if (s === 'AG' || s === 'A') return 'waiting';
   if (s === 'PS' || s === 'BOT' || s === 'B' || s === 'T') return 'bot';
   
-  // Se tem atendente mas o status não é 'F', provavelmente está em atendimento
+  // Fallback: se tem atendente humano mas status não é F, está em atendimento
   if (t.id_atendente && s !== 'F') return 'in_service';
   return 'bot'; 
 }
@@ -46,16 +46,9 @@ export const opaService = {
       const rawAttendants = result.attendants || [];
 
       console.group("DIAGNÓSTICO OPA SUITE");
-      console.log("Total Tickets Mesclados (Ativos + 1000 Recentes):", rawTickets.length);
-      if (rawTickets.length > 0) {
-        // Como agora os tickets estão mesclados e ordenados de forma mista,
-        // vamos logar um exemplo de ativo e um exemplo de finalizado se existirem.
-        const firstActive = rawTickets.find(t => t.status !== 'F');
-        const firstFinished = rawTickets.find(t => t.status === 'F');
-        
-        if (firstActive) console.log(">>> EXEMPLO TICKET ATIVO:", firstActive);
-        if (firstFinished) console.log(">>> EXEMPLO TICKET FINALIZADO RECENTE:", firstFinished);
-      }
+      console.log("Total Tickets Mesclados:", rawTickets.length);
+      const firstActive = rawTickets.find(t => t.status !== 'F');
+      if (firstActive) console.log(">>> EXEMPLO TICKET ATIVO:", firstActive);
       console.groupEnd();
 
       const attendants: Attendant[] = rawAttendants
@@ -68,7 +61,6 @@ export const opaService = {
 
       const attendantMap = new Map(attendants.map(a => [a.id, a.name]));
 
-      // Mapeamento (Filtro já foi feito no Backend)
       const tickets: Ticket[] = rawTickets
         .map((t: any) => {
           const status = determineTicketStatus(t);
@@ -82,8 +74,20 @@ export const opaService = {
               attName = rawAttName || attendantMap.get(attId) || 'Atendente';
           }
 
-          let clientName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined) || 'Cliente';
-          if (clientName === 'Cliente' && t.protocolo) clientName = `Prot: ${t.protocolo}`;
+          // Lógica de Nome do Cliente Corrigida: Prioriza Nome > Telefone > "Cliente"
+          // NUNCA coloca protocolo aqui.
+          let clientName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
+          
+          // Se não tem nome, tenta extrair o telefone do canal_cliente (ex: 5573998... @c.us)
+          if (!clientName && t.canal_cliente) {
+             const phonePart = String(t.canal_cliente).split('@')[0];
+             if (phonePart && phonePart.length > 5) {
+                // Formatação básica (Opcional, mas ajuda no visual)
+                clientName = phonePart;
+             }
+          }
+
+          if (!clientName) clientName = 'Cliente';
 
           return {
             id: String(t._id || t.id),
@@ -100,7 +104,6 @@ export const opaService = {
           };
         });
 
-      // Atualiza contagem de chats ativos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);

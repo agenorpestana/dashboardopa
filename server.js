@@ -154,19 +154,21 @@ app.get('/api/dashboard-data', async (req, res) => {
     const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    console.log(`[Proxy] Executando busca em duas etapas...`);
+    console.log(`[Proxy] Buscando Ativos e Finalizados separadamente...`);
 
-    // ETAPA 1: BUSCAR TODOS OS ATIVOS (STATUS != F)
-    // Isso garante que os cards de Espera, Atendimento e Bot nunca fiquem vazios
+    // ETAPA 1: BUSCAR ATIVOS (STATUS != F)
+    // Alterado: Removemos o filtro de atendente aqui para garantir que a fila (sem atendente) apareça.
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
-        status: { $ne: 'F' },
-        id_atendente: { $ne: ROBOT_ID }
+        status: { $ne: 'F' }
+      },
+      options: {
+        limit: 500,
+        sort: { date: -1 }
       }
     });
 
     // ETAPA 2: BUSCAR 1000 FINALIZADOS RECENTES (STATUS == F)
-    // Isso alimenta o Ranking e o TMA com os dados mais atuais do mês
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
@@ -175,7 +177,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       },
       options: {
         limit: 1000,
-        sort: { date: -1 } // Mais recentes primeiro
+        sort: { date: -1 }
       }
     });
 
@@ -192,10 +194,10 @@ app.get('/api/dashboard-data', async (req, res) => {
     const finishedTickets = getList(finishedRes);
     const attendants = getList(userRes);
 
-    // Mesclar os resultados
+    // Mesclar e retornar
     const allTickets = [...activeTickets, ...finishedTickets];
 
-    console.log(`[Proxy] Ativos: ${activeTickets.length} | Finalizados: ${finishedTickets.length} (Total: ${allTickets.length})`);
+    console.log(`[Proxy] Ativos: ${activeTickets.length} | Finalizados: ${finishedTickets.length}`);
 
     res.json({
       success: true,
