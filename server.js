@@ -37,7 +37,6 @@ async function initDB() {
     await connection.query(`CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(255) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
     await connection.query(`CREATE TABLE IF NOT EXISTS settings (id INT AUTO_INCREMENT PRIMARY KEY, api_url VARCHAR(255), api_token TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
     const [rows] = await connection.query('SELECT * FROM users WHERE username = ?', ['suporte']);
-    // @ts-ignore
     if (rows.length === 0) {
       const salt = await bcrypt.genSalt(10);
       const hash = await bcrypt.hash('200616', salt);
@@ -52,24 +51,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-function opaRequest(baseUrl, path, token, params = {}) {
+async function opaRequest(baseUrl, path, token, params = {}) {
   return new Promise((resolve) => {
     try {
-      // Normalização: Se a URL já termina com o path, não duplica
-      let finalUrlStr = baseUrl;
-      if (!finalUrlStr.endsWith(path)) {
-          finalUrlStr = `${baseUrl}${path}`;
-      }
+      let finalUrlStr = baseUrl.replace(/\/$/, '');
+      if (!finalUrlStr.endsWith(path)) finalUrlStr += path;
       
       const url = new URL(finalUrlStr);
       
       const loopbackFilter = {
         where: params.filter || {},
-        limit: params.options?.limit || 1000,
-        skip: params.options?.skip || 0,
-        order: params.options?.sort ? 
-          (params.options.sort.startsWith('-') ? `${params.options.sort.substring(1)} DESC` : `${params.options.sort} ASC`) : 
-          "_id DESC",
+        limit: params.options?.limit || 100,
+        order: "_id DESC",
         include: params.options?.populate || []
       };
 
@@ -79,13 +72,14 @@ function opaRequest(baseUrl, path, token, params = {}) {
       const options = {
         method: 'GET',
         headers: { 
-          'Authorization': `Bearer ${token}`,
+          'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
           'Accept': 'application/json'
         },
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname + url.search,
-        rejectUnauthorized: false
+        rejectUnauthorized: false,
+        timeout: 10000
       };
 
       const req = lib.request(options, (res) => {
@@ -94,22 +88,16 @@ function opaRequest(baseUrl, path, token, params = {}) {
         res.on('end', () => {
           try { 
             const parsed = JSON.parse(data);
-            if (res.statusCode >= 400) {
-                resolve({ ok: false, error: parsed, status: res.statusCode });
-            } else {
-                resolve({ ok: true, data: parsed }); 
-            }
+            if (res.statusCode >= 400) resolve({ ok: false, error: parsed, status: res.statusCode });
+            else resolve({ ok: true, data: parsed }); 
           }
-          catch (e) { 
-            resolve({ ok: false, error: 'JSON Parse Error', raw: data }); 
-          }
+          catch (e) { resolve({ ok: false, error: 'JSON Parse Error', raw: data }); }
         });
       });
       req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Timeout' }); });
       req.end();
-    } catch (e) { 
-      resolve({ ok: false, error: e.message }); 
-    }
+    } catch (e) { resolve({ ok: false, error: e.message }); }
   });
 }
 
@@ -117,7 +105,6 @@ app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-    // @ts-ignore
     const user = rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
     res.json({ success: true, username: user.username });
@@ -135,11 +122,9 @@ app.post('/api/settings', async (req, res) => {
   const { username, password, api_url, api_token } = req.body;
   try {
     const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-    // @ts-ignore
     const user = userRows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(403).json({ success: false });
     const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
-    // @ts-ignore
     if (settingRows.length > 0) await pool.query('UPDATE settings SET api_url = ?, api_token = ? WHERE id = ?', [api_url, api_token, settingRows[0].id]);
     else await pool.query('INSERT INTO settings (api_url, api_token) VALUES (?, ?)', [api_url, api_token]);
     res.json({ success: true });
@@ -149,66 +134,49 @@ app.post('/api/settings', async (req, res) => {
 app.get('/api/dashboard-data', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    // @ts-ignore
     const config = rows[0];
-    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração ausente' });
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
     
-    // Limpeza da URL para garantir que termina corretamente
     let baseUrl = config.api_url.trim().replace(/\/$/, '');
-    if (!baseUrl.includes('/api/v1')) {
-        baseUrl += '/api/v1';
-    }
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     
     const token = config.api_token;
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
 
-    console.log(`[Proxy] Buscando dados em: ${baseUrl}`);
+    // 1. Tenta buscar ativos com filtro
+    let activeRes = await opaRequest(baseUrl, '/atendimento', token, {
+      filter: { status: { "neq": "F" } },
+      options: { limit: 200, populate }
+    });
 
-    // Chamadas mais simples para evitar erros de filtro rígido
-    const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
-      opaRequest(baseUrl, '/atendimento', token, {
-        filter: { status: { "neq": "F" } }, // Apenas não-finalizados
-        options: { limit: 500, populate: populate }
-      }),
-      opaRequest(baseUrl, '/atendimento', token, {
-        filter: { status: "F" }, // Apenas finalizados
-        options: { limit: 1000, populate: populate, sort: "-_id" }
-      }),
-      opaRequest(baseUrl, '/usuario', token, {
-        filter: { status: "A" },
-        options: { limit: 200 }
-      }),
-      opaRequest(baseUrl, '/cliente', token, {
-        options: { limit: 500, sort: "-_id" }
-      }),
-      opaRequest(baseUrl, '/contato', token, {
-        options: { limit: 500, sort: "-_id" }
-      })
+    // 2. Se falhar ou vier vazio, tenta buscar TUDO sem filtro (Fallback)
+    if (!activeRes.ok || (activeRes.data?.data?.length === 0 && !Array.isArray(activeRes.data))) {
+       console.log("[Proxy] Fallback: Tentando busca sem filtros...");
+       activeRes = await opaRequest(baseUrl, '/atendimento', token, {
+         options: { limit: 100, populate }
+       });
+    }
+
+    const [uRes, historyRes] = await Promise.all([
+      opaRequest(baseUrl, '/usuario', token, { filter: { status: "A" }, options: { limit: 100 } }),
+      opaRequest(baseUrl, '/atendimento', token, { filter: { status: "F" }, options: { limit: 100, populate } })
     ]);
 
-    const getList = (res, name) => {
-      if (!res.ok) {
-        console.warn(`[Proxy] Erro em ${name}:`, res.error);
-        return [];
-      }
-      const list = res.data?.data || (Array.isArray(res.data) ? res.data : []);
-      console.log(`[Proxy] ${name} retornou ${list.length} itens.`);
-      return list;
-    };
-
-    const tickets = [...getList(activeRes, "Ativos"), ...getList(historyRes, "Histórico")];
+    const getList = (res) => res.ok ? (res.data?.data || (Array.isArray(res.data) ? res.data : [])) : [];
 
     res.json({
       success: true,
-      tickets: tickets,
-      attendants: getList(uRes, "Atendentes"),
-      clients: getList(clientRes, "Clientes"),
-      contacts: getList(contactRes, "Contatos")
+      tickets: [...getList(activeRes), ...getList(historyRes)],
+      attendants: getList(uRes),
+      debug_info: {
+        active_ok: activeRes.ok,
+        active_count: getList(activeRes).length,
+        history_count: getList(historyRes).length
+      }
     });
 
   } catch (error) { 
-    console.error(`[Proxy Fatal]`, error.message);
-    res.status(500).json({ error: error.message }); 
+    res.status(500).json({ success: false, error: error.message }); 
   }
 });
 
