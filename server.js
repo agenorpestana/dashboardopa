@@ -153,34 +153,22 @@ app.get('/api/dashboard-data', async (req, res) => {
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
     
-    // ID do Robô Victor (Robô de Atendimento)
+    // Identificação do Robô Victor
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    console.log(`[Proxy] Solicitando dados ao Opa Suite (Excluindo Robô ${ROBOT_ID})...`);
-
-    // ETAPA 1: BUSCAR ATIVOS (STATUS != F) - Excluímos o robô aqui também
+    // ETAPA 1: BUSCAR ATIVOS
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
-      filter: {
-        status: { $ne: 'F' },
-        id_atendente: { $ne: ROBOT_ID }
-      },
-      options: {
-        limit: 500,
-        sort: { date: -1 }
-      }
+      filter: { status: { $ne: 'F' } },
+      options: { limit: 400, sort: { date: -1 } }
     });
 
-    // ETAPA 2: BUSCAR 1000 FINALIZADOS RECENTES - Excluímos o robô aqui também
+    // ETAPA 2: BUSCAR FINALIZADOS
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
-        dataInicialAbertura: dateFilter,
-        id_atendente: { $ne: ROBOT_ID }
+        dataInicialAbertura: dateFilter
       },
-      options: {
-        limit: 1000,
-        sort: { date: -1 }
-      }
+      options: { limit: 1000, sort: { date: -1 } }
     });
 
     const userRes = await opaRequest(baseUrl, '/usuario', token, {
@@ -192,13 +180,24 @@ app.get('/api/dashboard-data', async (req, res) => {
       return Array.isArray(res.data) ? res.data : [];
     };
 
+    // Função de limpeza de Robô
+    const isRobot = (t) => {
+      const attId = typeof t.id_atendente === 'object' ? String(t.id_atendente?._id || '') : String(t.id_atendente || '');
+      const attName = typeof t.id_atendente === 'object' ? String(t.id_atendente?.nome || '') : '';
+      return attId === ROBOT_ID || attName.toLowerCase().includes('robô') || attName.toLowerCase().includes('robot');
+    };
+
     const activeTickets = getList(activeRes);
-    const finishedTickets = getList(finishedRes);
-    const attendants = getList(userRes);
+    // Removemos do ranking (finalizados) qualquer traço do robô
+    const finishedTickets = getList(finishedRes).filter(t => !isRobot(t));
+    
+    const attendants = getList(userRes).filter(a => {
+        const id = String(a._id || a.id);
+        const nome = String(a.nome || '');
+        return id !== ROBOT_ID && !nome.toLowerCase().includes('robô');
+    });
 
     const allTickets = [...activeTickets, ...finishedTickets];
-
-    console.log(`[Proxy] Ativos humanos: ${activeTickets.length} | Finalizados humanos: ${finishedTickets.length}`);
 
     res.json({
       success: true,

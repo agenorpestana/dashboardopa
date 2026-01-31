@@ -18,7 +18,7 @@ function calculateDuration(start: any, end?: any): number {
 
 function formatPhone(value: string): string {
   const cleaned = value.replace(/\D/g, '');
-  // Formato Brasil com DDI (ex: 5573988887777) -> (73) 98888-7777
+  // Formato Brasil com DDI (ex: 5573988887777)
   if (cleaned.startsWith('55') && cleaned.length >= 12) {
     const ddd = cleaned.substring(2, 4);
     const rest = cleaned.substring(4);
@@ -86,21 +86,21 @@ export const opaService = {
           const rawAttName = typeof attObj === 'object' ? String(attObj?.nome || '') : '';
           
           if (attId) {
-              attName = rawAttName || attendantMap.get(attId) || 'Atendente';
+              attName = rawAttName || attendantMap.get(attId);
           }
 
           // Lógica de Nome: Rigorosa para evitar Protocolo
           let clientDisplayName = '';
           const rawName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
           
-          // Se houver um nome e ele NÃO for apenas números (o que indicaria que é o protocolo ou telefone sem formatação)
-          if (rawName && !/^\d+$/.test(String(rawName).replace(/\D/g, ''))) {
+          // Se houver um nome e ele NÃO for apenas números longos (indicativo de protocolo ou telefone puro)
+          if (rawName && isNaN(Number(String(rawName).replace(/\s/g, '')))) {
             clientDisplayName = String(rawName);
           } else {
-            // Se o nome for apenas números ou estiver vazio, tentamos o canal_cliente (telefone)
+            // Tenta extrair telefone do canal_cliente ou do próprio campo de nome se for numérico
             const phoneInfo = t.canal_cliente || rawName || '';
             const phonePart = String(phoneInfo).split('@')[0];
-            if (phonePart && phonePart.length > 5 && /^\d+$/.test(phonePart)) {
+            if (phonePart && phonePart.length > 5) {
               clientDisplayName = formatPhone(phonePart);
             } else {
               clientDisplayName = 'Cliente';
@@ -122,6 +122,7 @@ export const opaService = {
           };
         });
 
+      // Atualiza contagem de chats ativos apenas para humanos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
