@@ -153,27 +153,29 @@ app.get('/api/dashboard-data', async (req, res) => {
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
     
-    // ID do Robô para exclusão nos finalizados
+    // ID do Robô Victor (Robô de Atendimento)
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // ETAPA 1: BUSCAR TUDO QUE ESTÁ ATIVO (CARDS EM TEMPO REAL)
+    console.log(`[Proxy] Solicitando dados ao Opa Suite (Excluindo Robô ${ROBOT_ID})...`);
+
+    // ETAPA 1: BUSCAR ATIVOS (STATUS != F) - Excluímos o robô aqui também
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
-        status: { $ne: 'F' }
+        status: { $ne: 'F' },
+        id_atendente: { $ne: ROBOT_ID }
       },
       options: {
-        limit: 300,
+        limit: 500,
         sort: { date: -1 }
       }
     });
 
-    // ETAPA 2: BUSCAR FINALIZADOS RECENTES (HISTÓRICO / TMA / RANKING)
-    // Refinamos aqui para garantir que NÃO tragamos tickets do robô ou que ainda sejam BOT
+    // ETAPA 2: BUSCAR 1000 FINALIZADOS RECENTES - Excluímos o robô aqui também
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
         dataInicialAbertura: dateFilter,
-        id_atendente: { $ne: ROBOT_ID } // Exclui robô por ID
+        id_atendente: { $ne: ROBOT_ID }
       },
       options: {
         limit: 1000,
@@ -195,6 +197,8 @@ app.get('/api/dashboard-data', async (req, res) => {
     const attendants = getList(userRes);
 
     const allTickets = [...activeTickets, ...finishedTickets];
+
+    console.log(`[Proxy] Ativos humanos: ${activeTickets.length} | Finalizados humanos: ${finishedTickets.length}`);
 
     res.json({
       success: true,

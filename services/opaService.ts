@@ -18,19 +18,22 @@ function calculateDuration(start: any, end?: any): number {
 
 function formatPhone(value: string): string {
   const cleaned = value.replace(/\D/g, '');
-  // Formato Brasil com DDI (55739...)
+  // Formato Brasil com DDI (ex: 5573988887777) -> (73) 98888-7777
   if (cleaned.startsWith('55') && cleaned.length >= 12) {
     const ddd = cleaned.substring(2, 4);
-    const part1 = cleaned.length === 13 ? cleaned.substring(4, 9) : cleaned.substring(4, 8);
-    const part2 = cleaned.length === 13 ? cleaned.substring(9) : cleaned.substring(8);
-    return `(${ddd}) ${part1}-${part2}`;
+    const rest = cleaned.substring(4);
+    if (rest.length === 9) {
+      return `(${ddd}) ${rest.substring(0, 5)}-${rest.substring(5)}`;
+    } else if (rest.length === 8) {
+      return `(${ddd}) ${rest.substring(0, 4)}-${rest.substring(4)}`;
+    }
   }
-  // Formato local sem DDI (739...)
-  if (cleaned.length >= 10 && cleaned.length <= 11) {
-    const ddd = cleaned.substring(0, 2);
-    const part1 = cleaned.length === 11 ? cleaned.substring(2, 7) : cleaned.substring(2, 6);
-    const part2 = cleaned.length === 11 ? cleaned.substring(7) : cleaned.substring(6);
-    return `(${ddd}) ${part1}-${part2}`;
+  // Formato local com DDD (ex: 73988887777)
+  if (cleaned.length === 11) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
+  }
+  if (cleaned.length === 10) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 6)}-${cleaned.substring(6)}`;
   }
   return value;
 }
@@ -86,27 +89,28 @@ export const opaService = {
               attName = rawAttName || attendantMap.get(attId) || 'Atendente';
           }
 
-          // Lógica de Nome: Prioriza nome real. Se não houver, tenta extrair e formatar o telefone.
-          let clientDisplayName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
+          // Lógica de Nome: Rigorosa para evitar Protocolo
+          let clientDisplayName = '';
+          const rawName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
           
-          if (!clientDisplayName && t.canal_cliente) {
-             const phonePart = String(t.canal_cliente).split('@')[0];
-             if (phonePart && phonePart.length > 5) {
-                clientDisplayName = formatPhone(phonePart);
-             }
+          // Se houver um nome e ele NÃO for apenas números (o que indicaria que é o protocolo ou telefone sem formatação)
+          if (rawName && !/^\d+$/.test(String(rawName).replace(/\D/g, ''))) {
+            clientDisplayName = String(rawName);
+          } else {
+            // Se o nome for apenas números ou estiver vazio, tentamos o canal_cliente (telefone)
+            const phoneInfo = t.canal_cliente || rawName || '';
+            const phonePart = String(phoneInfo).split('@')[0];
+            if (phonePart && phonePart.length > 5 && /^\d+$/.test(phonePart)) {
+              clientDisplayName = formatPhone(phonePart);
+            } else {
+              clientDisplayName = 'Cliente';
+            }
           }
-
-          // Se o nome for puramente numérico (comum quando o contato não está salvo), formatamos
-          if (clientDisplayName && /^\d+$/.test(clientDisplayName.replace(/\D/g, ''))) {
-            clientDisplayName = formatPhone(clientDisplayName);
-          }
-
-          if (!clientDisplayName) clientDisplayName = 'Cliente';
 
           return {
             id: String(t._id || t.id),
             protocol: String(t.protocolo || 'N/A'),
-            clientName: String(clientDisplayName),
+            clientName: clientDisplayName,
             contact: t.cliente_fone || t.canal_cliente || '',
             waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
             durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
