@@ -44,11 +44,11 @@ export const opaService = {
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
         const id = String(c._id || c.id);
-        const phone = c.fone || c.telefone || c.whatsapp || c.celular || '';
-        clientLookup.set(id, { name: c.nome || '', phone });
+        const phone = c.fone || c.telefone || c.whatsapp || c.celular || c.cpf_cnpj || '';
+        clientLookup.set(id, { name: c.nome || '', phone: String(phone) });
       });
 
-      // Mapeamento de Contatos
+      // Mapeamento de Contatos (WhatsApp)
       const contactLookup = new Map<string, {name: string, phone: string}>();
       rawContacts.forEach((c: any) => {
         const id = String(c._id || c.id);
@@ -56,7 +56,7 @@ export const opaService = {
         if (!phone && c.fones && Array.isArray(c.fones) && c.fones.length > 0) {
           phone = c.fones[0].numero || c.fones[0].fone || '';
         }
-        contactLookup.set(id, { name: c.nome || '', phone });
+        contactLookup.set(id, { name: c.nome || '', phone: String(phone) });
       });
 
       const attendantLookup = new Map<string, string>();
@@ -79,13 +79,21 @@ export const opaService = {
         let foundName = '';
         let foundPhone = '';
 
+        // Tenta capturar o telefone do "canal_cliente" (comum no WhatsApp do Opa)
+        // O canal_cliente costuma ser o número puro ou o JID (ex: 5511999999999@s.whatsapp.net)
+        let phoneFromCanal = String(t.canal_cliente || '').split('@')[0];
+        if (phoneFromCanal && !/^[a-f0-9-]{36}$/.test(phoneFromCanal)) { // Evita UUIDs de canais web
+           foundPhone = phoneFromCanal;
+        }
+
         const clientId = typeof t.id_cliente === 'object' ? t.id_cliente?._id : t.id_cliente;
         const contactId = typeof t.id_contato === 'object' ? t.id_contato?._id : t.id_contato;
 
+        // Busca nos mapas carregados
         if (clientId && clientLookup.has(String(clientId))) {
           const info = clientLookup.get(String(clientId))!;
           foundName = info.name;
-          foundPhone = info.phone;
+          if (!foundPhone) foundPhone = info.phone;
         }
 
         if (contactId && contactLookup.has(String(contactId))) {
@@ -94,15 +102,15 @@ export const opaService = {
           if (!foundPhone) foundPhone = info.phone;
         }
 
-        // Fallback direto do objeto populado caso o lookup falhe
+        // Fallbacks diretos
         if (!foundName || foundName.toUpperCase() === 'CLIENTE') {
           foundName = t.id_cliente?.nome || t.id_contato?.nome || t.cliente_nome || '';
         }
         if (!foundPhone) {
-          foundPhone = t.id_contato?.fones?.[0]?.numero || t.cliente_fone || '';
+          foundPhone = t.id_contato?.fones?.[0]?.numero || t.cliente_fone || t.contato_fone || '';
         }
 
-        // Função para validar se o que temos é um nome real ou apenas lixo de sistema/protocolo
+        // Função de detecção de "Lixo"
         const isJunk = (str: string) => {
           if (!str) return true;
           const s = str.trim().toUpperCase();
@@ -110,23 +118,24 @@ export const opaService = {
           return s === 'CLIENTE' || 
                  s === 'ANONIMO' || 
                  s === 'NULL' ||
+                 s === 'WHATSAPP USER' ||
                  s === p || 
                  s.includes(p) ||
-                 /^(ITL|OPA|PRT)/.test(s) || // Padrões de protocolo
-                 (s.length >= 8 && /^\d+$/.test(s)); // IDs numéricos longos
+                 /^(ITL|OPA|PRT)/.test(s) || 
+                 (s.length >= 8 && /^\d+$/.test(s)); 
         };
 
-        // --- LÓGICA DE EXIBIÇÃO FINAL ---
-        // Prioridade 1: Nome Real (Se não for junk)
-        // Prioridade 2: Telefone (Se nome for junk)
+        // --- HIERARQUIA FINAL ---
         let finalDisplayName = foundName;
+        
+        // Se o nome é junk ou vazio, USA O TELEFONE
         if (isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone;
         }
 
-        // Se após tudo ainda for inválido, forçamos o telefone disponível (WhatsApp)
+        // Se o telefone também for junk (o que não deve ocorrer no WhatsApp), usa o que sobrou, menos o protocolo
         if (!finalDisplayName || isJunk(finalDisplayName)) {
-          finalDisplayName = foundPhone || 'WhatsApp User';
+          finalDisplayName = foundPhone || 'Sem Nome';
         }
 
         let finalAttendant = undefined;
