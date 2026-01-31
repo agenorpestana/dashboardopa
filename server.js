@@ -149,26 +149,28 @@ app.get('/api/dashboard-data', async (req, res) => {
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     const token = config.api_token;
 
+    // Formatar data para o padrão do OPA: YYYY-MM-DD 00:00:00
     const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const dateFilter = `${year}-${month}-01 00:00:00`;
     
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // 1. ATIVOS
+    // 1. ATIVOS (Em espera, Bot, Em Atendimento)
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: { status: { $ne: 'F' } },
-      options: { limit: 500, sort: { date: -1 } }
+      options: { limit: 1000, sort: { date: -1 } }
     });
 
-    // 2. FINALIZADOS (Ajustado para Range $gte e maior limite)
+    // 2. FINALIZADOS (Usa o campo 'date' que é mais confiável com operadores de range)
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
-        dataInicialAbertura: { $gte: dateFilter }, // Alterado para buscar tudo a partir do dia 1
+        date: { $gte: dateFilter }, 
         id_atendente: { $ne: ROBOT_ID }
       },
-      options: { limit: 3000, sort: { date: -1 } } // Limite aumentado para 3000
+      options: { limit: 3000, sort: { date: -1 } }
     });
 
     // 3. USUÁRIOS
@@ -181,14 +183,15 @@ app.get('/api/dashboard-data', async (req, res) => {
         options: { limit: 300 }
     });
 
-    // 5. PERÍODOS (Nova API solicitada para diagnóstico)
+    // 5. PERÍODOS
     const periodRes = await opaRequest(baseUrl, '/atendimento/periodo', token, {
         options: { limit: 100 }
     });
 
     const getList = (res) => {
       if (res.ok && res.data?.status === "success") return res.data.data || [];
-      return Array.isArray(res.data) ? res.data : [];
+      if (res.ok && Array.isArray(res.data)) return res.data;
+      return [];
     };
 
     const isRobot = (t) => {
@@ -216,7 +219,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       tickets: [...activeTickets, ...finishedTickets],
       attendants: attendants,
       departments: departments,
-      periods: periods // Enviando períodos para log no frontend
+      periods: periods
     });
 
   } catch (error) { 
