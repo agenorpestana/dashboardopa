@@ -67,7 +67,7 @@ async function opaRequest(baseUrl, path, token, body = {}) {
       const jsonBody = JSON.stringify(body);
 
       const options = {
-        method: 'GET', // A documentação do Opa Suite usa GET com body
+        method: 'GET',
         headers: { 
           'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
           'Accept': 'application/json',
@@ -78,7 +78,7 @@ async function opaRequest(baseUrl, path, token, body = {}) {
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         rejectUnauthorized: false,
-        timeout: 15000
+        timeout: 20000 // Aumentado timeout para buscas maiores (1000 registros)
       };
 
       const req = lib.request(options, (res) => {
@@ -111,7 +111,7 @@ async function opaRequest(baseUrl, path, token, body = {}) {
         resolve({ ok: false, error: 'Timeout' });
       });
 
-      req.write(jsonBody); // Envia o filtro no corpo da requisição GET
+      req.write(jsonBody);
       req.end();
     } catch (e) { 
       resolve({ ok: false, error: e.message }); 
@@ -159,26 +159,30 @@ app.get('/api/dashboard-data', async (req, res) => {
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     const token = config.api_token;
 
-    // Data de 7 dias atrás para o filtro dataInicialAbertura
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const dateFilter = sevenDaysAgo.toISOString().split('T')[0];
+    // Calcula o primeiro dia do mês atual (ex: 2024-05-01)
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Formata manualmente para evitar fuso horário invertendo o dia
+    const yyyy = firstDayOfMonth.getFullYear();
+    const mm = String(firstDayOfMonth.getMonth() + 1).padStart(2, '0');
+    const dd = "01";
+    const dateFilter = `${yyyy}-${mm}-${dd}`;
 
-    console.log(`[Proxy] Solicitando atendimentos desde: ${dateFilter}`);
+    console.log(`[Proxy] Solicitando atendimentos do mês: ${dateFilter} com limite de 1000`);
 
-    // Requisição unificada para trazer os últimos atendimentos e filtrar localmente
-    // Isso evita problemas caso o filtro de status no servidor esteja com erro
+    // Busca atendimentos com o novo limite e filtro de data do mês
     const ticketRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         dataInicialAbertura: dateFilter
       },
       options: {
-        limit: 500
+        limit: 1000 // Limite aumentado conforme solicitado
       }
     });
 
+    // Busca usuários (atendentes) sem filtro de status A para garantir mapeamento de nomes antigos
     const userRes = await opaRequest(baseUrl, '/usuario', token, {
-      options: { limit: 200 }
+      options: { limit: 300 }
     });
 
     const getList = (res) => {
@@ -191,7 +195,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     const allTickets = getList(ticketRes);
     const attendants = getList(userRes);
 
-    console.log(`[Proxy] Finalizado. Tickets: ${allTickets.length}, Atendentes: ${attendants.length}`);
+    console.log(`[Proxy] Sucesso: ${allTickets.length} tickets e ${attendants.length} atendentes carregados.`);
 
     res.json({
       success: true,
