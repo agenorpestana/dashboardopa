@@ -102,32 +102,33 @@ export const opaService = {
           if (!foundPhone) foundPhone = info.phone;
         }
 
-        // Tenta buscar em propriedades diretas do ticket (algumas versões da API enviam flat)
+        // Tenta buscar em propriedades diretas do ticket
         if (!foundName) foundName = t.cliente_nome || t.contato_nome || (t.id_cliente?.nome) || (t.id_contato?.nome) || '';
         if (!foundPhone) foundPhone = t.cliente_fone || t.contato_fone || (t.id_contato?.fones?.[0]?.numero) || '';
 
-        // Validação: O que temos é um nome real ou lixo de sistema?
-        const isSystemJunk = (str: string) => {
+        // Função para detectar se a string é lixo/protocolo
+        const isJunk = (str: string) => {
           if (!str) return true;
           const s = str.trim().toUpperCase();
-          // Detecta padrões ITL, OPA, PRT ou sequências numéricas longas (protocolos)
+          // Detecta se é o próprio protocolo, padrões comuns ou sequências numéricas muito longas (IDs internos)
           return s === 'CLIENTE' || 
                  s === 'ANONIMO' || 
                  s === protocol.toUpperCase() || 
                  /^(ITL|OPA|PRT)\d+/.test(s) || 
-                 /^\d{10,}$/.test(s);
+                 (s.length >= 10 && /^\d+$/.test(s)); // Sequência numérica longa (provável ID)
         };
 
-        // Decisão Hierárquica: Nome Real -> Telefone -> Protocolo (Último caso)
+        // Decisão Hierárquica Final: Nome Real -> Telefone -> "Cliente"
         let finalDisplayName = foundName;
-        if (isSystemJunk(finalDisplayName)) {
-          // Se o nome é junk, priorizamos o telefone
+        
+        // Se o nome for lixo, tenta o telefone
+        if (isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone;
-          
-          // Se o telefone também for junk ou vazio, aí sim usamos o protocolo
-          if (isSystemJunk(finalDisplayName)) {
-            finalDisplayName = protocol || 'Cliente';
-          }
+        }
+        
+        // Se após tentar o telefone ainda for lixo ou vazio, usa placeholder genérico (NUNCA o protocolo)
+        if (isJunk(finalDisplayName)) {
+          finalDisplayName = 'Cliente';
         }
 
         // --- RESOLUÇÃO DO ATENDENTE ---
