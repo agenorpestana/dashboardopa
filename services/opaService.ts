@@ -26,12 +26,17 @@ function determineTicketStatus(t: any): TicketStatus {
   return 'bot'; 
 }
 
+/**
+ * Formata números de telefone para o padrão brasileiro
+ */
 function formatPhone(phone: string): string {
   if (!phone) return '';
   let cleaned = phone.replace(/\D/g, '');
+  
   if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
     cleaned = cleaned.substring(2);
   }
+
   if (cleaned.length === 11) {
     return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
   }
@@ -44,6 +49,7 @@ function formatPhone(phone: string): string {
   if (cleaned.length === 8) {
     return `${cleaned.substring(0, 4)}-${cleaned.substring(4)}`;
   }
+
   return phone;
 }
 
@@ -61,17 +67,9 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // NOMES DE ROBÔS PARA FILTRAR
+      // DADOS DO ROBÔ PARA EXCLUSÃO
+      const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
       const ROBOT_NAMES = ["Victor (Robô de Adentimento)", "Victor"];
-
-      // LOG DE DEPURACÃO PARA O USUÁRIO VER IDs E NOMES NO CONSOLE (F12)
-      console.log("%c--- LISTA DE ATENDENTES DETECTADOS ---", "color: #0ea5e9; font-weight: bold; font-size: 12px;");
-      console.table(rawAttendants.map((a: any) => ({
-        ID: a._id || a.id,
-        Nome: a.nome,
-        Status: a.status === 'A' ? 'Ativo' : 'Inativo',
-        Bot: ROBOT_NAMES.some(rName => String(a.nome || '').includes(rName)) ? 'SIM' : 'NÃO'
-      })));
 
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
@@ -93,9 +91,10 @@ export const opaService = {
       const attendantLookup = new Map<string, string>();
       const attendants: Attendant[] = rawAttendants
         .filter((a: any) => {
-          // Filtra o robô da lista de atendentes ativos
-          const name = a.nome || '';
-          return !ROBOT_NAMES.some(rName => name.includes(rName));
+          const id = String(a._id || a.id);
+          const name = String(a.nome || '');
+          // Filtra o robô pelo ID exato ou pelo nome
+          return id !== ROBOT_ID && !ROBOT_NAMES.some(rName => name.includes(rName));
         })
         .map((a: any) => {
           const id = String(a._id || a.id);
@@ -159,21 +158,24 @@ export const opaService = {
           finalDisplayName = foundPhone || 'Sem Nome';
         }
 
+        // Formatação de telefone no nome se for puramente numérico
         if (/^\d+$/.test(finalDisplayName.replace(/\D/g, '')) && (finalDisplayName.length >= 8)) {
           finalDisplayName = formatPhone(finalDisplayName);
         }
 
         let finalAttendant = undefined;
-        let isRobotTicket = false;
+        let isRobot = false;
         
         if (t.id_atendente) {
           const attId = typeof t.id_atendente === 'object' ? t.id_atendente._id : t.id_atendente;
-          const nameFromApi = t.id_atendente?.nome || attendantLookup.get(String(attId));
-          
-          if (nameFromApi && ROBOT_NAMES.some(rName => nameFromApi.includes(rName))) {
-            isRobotTicket = true;
+          const attIdStr = String(attId);
+          const attNameStr = String(t.id_atendente?.nome || attendantLookup.get(attIdStr) || '');
+
+          if (attIdStr === ROBOT_ID || ROBOT_NAMES.some(r => attNameStr.includes(r))) {
+            isRobot = true;
+          } else {
+            finalAttendant = attNameStr;
           }
-          finalAttendant = nameFromApi;
         }
 
         return {
@@ -184,13 +186,14 @@ export const opaService = {
           waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
-          attendantName: isRobotTicket ? undefined : finalAttendant, // Se for robô, limpamos o nome para não contar no ranking
+          attendantName: isRobot ? undefined : finalAttendant, // Se for robô, remove o nome do atendente deste ticket
           department: t.id_motivo_atendimento?.motivo || t.setor?.nome || 'Suporte',
           createdAt: t.date,
           closedAt: t.fim
         };
       });
 
+      // Contabiliza chats ativos apenas para humanos
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
