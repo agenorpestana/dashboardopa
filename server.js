@@ -52,17 +52,17 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-/**
- * Função de requisição para o Opa Suite (Padrão Loopback)
- */
 function opaRequest(baseUrl, path, token, params = {}) {
   return new Promise((resolve) => {
     try {
-      const url = new URL(`${baseUrl}${path}`);
+      // Normalização: Se a URL já termina com o path, não duplica
+      let finalUrlStr = baseUrl;
+      if (!finalUrlStr.endsWith(path)) {
+          finalUrlStr = `${baseUrl}${path}`;
+      }
       
-      // O Opa Suite usa o padrão Loopback. 
-      // Em versões mais antigas, "populate" deve ser "include"
-      // e operadores como "$ne" devem ser "neq"
+      const url = new URL(finalUrlStr);
+      
       const loopbackFilter = {
         where: params.filter || {},
         limit: params.options?.limit || 1000,
@@ -70,9 +70,7 @@ function opaRequest(baseUrl, path, token, params = {}) {
         order: params.options?.sort ? 
           (params.options.sort.startsWith('-') ? `${params.options.sort.substring(1)} DESC` : `${params.options.sort} ASC`) : 
           "_id DESC",
-        // Tenta usar tanto include quanto populate para máxima compatibilidade
-        include: params.options?.populate || [],
-        populate: params.options?.populate || []
+        include: params.options?.populate || []
       };
 
       url.searchParams.append('filter', JSON.stringify(loopbackFilter));
@@ -97,25 +95,19 @@ function opaRequest(baseUrl, path, token, params = {}) {
           try { 
             const parsed = JSON.parse(data);
             if (res.statusCode >= 400) {
-                console.error(`[OpaAPI Error ${res.statusCode}] em ${path}:`, JSON.stringify(parsed).substring(0, 200));
                 resolve({ ok: false, error: parsed, status: res.statusCode });
             } else {
                 resolve({ ok: true, data: parsed }); 
             }
           }
           catch (e) { 
-            console.error(`[OpaAPI Parse Error] em ${path}:`, data.substring(0, 100));
-            resolve({ ok: false, error: 'JSON Parse Error' }); 
+            resolve({ ok: false, error: 'JSON Parse Error', raw: data }); 
           }
         });
       });
-      req.on('error', (e) => {
-        console.error(`[OpaAPI Conn Error] em ${path}:`, e.message);
-        resolve({ ok: false, error: e.message });
-      });
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
       req.end();
     } catch (e) { 
-      console.error(`[OpaAPI Internal Error]`, e.message);
       resolve({ ok: false, error: e.message }); 
     }
   });
@@ -159,74 +151,63 @@ app.get('/api/dashboard-data', async (req, res) => {
     const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
     // @ts-ignore
     const config = rows[0];
-    if (!config || !config.api_url) return res.status(400).json({ error: 'URL da API não configurada' });
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração ausente' });
     
-    const baseUrl = config.api_url.replace(/\/$/, '');
+    // Limpeza da URL para garantir que termina corretamente
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) {
+        baseUrl += '/api/v1';
+    }
+    
     const token = config.api_token;
-
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
-    const robotId = '5d1642ad4b16a50312cc8f4d';
 
-    console.log(`[Dashboard] Iniciando coleta de dados em: ${baseUrl}`);
+    console.log(`[Proxy] Buscando dados em: ${baseUrl}`);
 
-    // Nota: Mudamos "$ne" para "neq" para maior compatibilidade com Loopback
-    const [activeRes, h1, h2, h3, uRes, clientRes, contactRes] = await Promise.all([
-      opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: { "neq": "F" }, id_atendente: { "neq": robotId } },
+    // Chamadas mais simples para evitar erros de filtro rígido
+    const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
+      opaRequest(baseUrl, '/atendimento', token, {
+        filter: { status: { "neq": "F" } }, // Apenas não-finalizados
+        options: { limit: 500, populate: populate }
+      }),
+      opaRequest(baseUrl, '/atendimento', token, {
+        filter: { status: "F" }, // Apenas finalizados
         options: { limit: 1000, populate: populate, sort: "-_id" }
       }),
-      opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: "F", id_atendente: { "neq": robotId } },
-        options: { limit: 1000, populate: populate, sort: "-_id" }
-      }),
-      opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: "F", id_atendente: { "neq": robotId } },
-        options: { limit: 1000, skip: 1000, populate: populate, sort: "-_id" }
-      }),
-      opaRequest(baseUrl, '/api/v1/atendimento', token, {
-        filter: { status: "F", id_atendente: { "neq": robotId } },
-        options: { limit: 1000, skip: 2000, populate: populate, sort: "-_id" }
-      }),
-      opaRequest(baseUrl, '/api/v1/usuario', token, {
+      opaRequest(baseUrl, '/usuario', token, {
         filter: { status: "A" },
         options: { limit: 200 }
       }),
-      opaRequest(baseUrl, '/api/v1/cliente', token, {
-        options: { limit: 1000, sort: "-_id" }
+      opaRequest(baseUrl, '/cliente', token, {
+        options: { limit: 500, sort: "-_id" }
       }),
-      opaRequest(baseUrl, '/api/v1/contato', token, {
-        options: { limit: 1000, sort: "-_id" }
+      opaRequest(baseUrl, '/contato', token, {
+        options: { limit: 500, sort: "-_id" }
       })
     ]);
 
     const getList = (res, name) => {
       if (!res.ok) {
-        console.warn(`[Dashboard] Falha ao obter ${name}:`, res.error);
+        console.warn(`[Proxy] Erro em ${name}:`, res.error);
         return [];
       }
-      const data = res.data;
-      const list = data?.data || (Array.isArray(data) ? data : []);
-      console.log(`[Dashboard] ${name} coletados: ${list.length}`);
+      const list = res.data?.data || (Array.isArray(res.data) ? res.data : []);
+      console.log(`[Proxy] ${name} retornou ${list.length} itens.`);
       return list;
     };
 
-    const activeList = getList(activeRes, "Ativos");
-    const h1List = getList(h1, "Histórico P1");
-    const h2List = getList(h2, "Histórico P2");
-    const h3List = getList(h3, "Histórico P3");
-    
-    const historyList = [...h1List, ...h2List, ...h3List];
+    const tickets = [...getList(activeRes, "Ativos"), ...getList(historyRes, "Histórico")];
 
     res.json({
       success: true,
-      tickets: [...activeList, ...historyList],
+      tickets: tickets,
       attendants: getList(uRes, "Atendentes"),
       clients: getList(clientRes, "Clientes"),
       contacts: getList(contactRes, "Contatos")
     });
 
   } catch (error) { 
-    console.error(`[Dashboard Fatal Error]`, error.message);
+    console.error(`[Proxy Fatal]`, error.message);
     res.status(500).json({ error: error.message }); 
   }
 });
