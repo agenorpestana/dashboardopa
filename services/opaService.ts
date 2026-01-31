@@ -26,6 +26,39 @@ function determineTicketStatus(t: any): TicketStatus {
   return 'bot'; 
 }
 
+/**
+ * Formata números de telefone para o padrão (XX) XXXXX-XXXX ou (XX) XXXX-XXXX
+ */
+function formatPhone(phone: string): string {
+  if (!phone) return '';
+  // Remove tudo que não for número
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // Se começar com 55 e tiver 12 ou 13 dígitos, remove o 55
+  if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
+    cleaned = cleaned.substring(2);
+  }
+
+  // Celular com DDD: (XX) XXXXX-XXXX (11 dígitos)
+  if (cleaned.length === 11) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
+  }
+  // Fixo com DDD: (XX) XXXX-XXXX (10 dígitos)
+  if (cleaned.length === 10) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 6)}-${cleaned.substring(6)}`;
+  }
+  // Sem DDD mas com 9 dígitos (Celular)
+  if (cleaned.length === 9) {
+    return `${cleaned.substring(0, 5)}-${cleaned.substring(5)}`;
+  }
+  // Sem DDD mas com 8 dígitos (Fixo)
+  if (cleaned.length === 8) {
+    return `${cleaned.substring(0, 4)}-${cleaned.substring(4)}`;
+  }
+
+  return phone; // Retorna original se não encaixar nos padrões
+}
+
 export const opaService = {
   fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[] }> => {
     if (!config.apiUrl || !config.apiToken) return { tickets: [], attendants: [] };
@@ -40,7 +73,6 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // Mapeamento de Clientes
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
         const id = String(c._id || c.id);
@@ -48,7 +80,6 @@ export const opaService = {
         clientLookup.set(id, { name: c.nome || '', phone: String(phone) });
       });
 
-      // Mapeamento de Contatos (WhatsApp)
       const contactLookup = new Map<string, {name: string, phone: string}>();
       rawContacts.forEach((c: any) => {
         const id = String(c._id || c.id);
@@ -79,17 +110,14 @@ export const opaService = {
         let foundName = '';
         let foundPhone = '';
 
-        // Tenta capturar o telefone do "canal_cliente" (comum no WhatsApp do Opa)
-        // O canal_cliente costuma ser o número puro ou o JID (ex: 5511999999999@s.whatsapp.net)
         let phoneFromCanal = String(t.canal_cliente || '').split('@')[0];
-        if (phoneFromCanal && !/^[a-f0-9-]{36}$/.test(phoneFromCanal)) { // Evita UUIDs de canais web
+        if (phoneFromCanal && !/^[a-f0-9-]{36}$/.test(phoneFromCanal)) { 
            foundPhone = phoneFromCanal;
         }
 
         const clientId = typeof t.id_cliente === 'object' ? t.id_cliente?._id : t.id_cliente;
         const contactId = typeof t.id_contato === 'object' ? t.id_contato?._id : t.id_contato;
 
-        // Busca nos mapas carregados
         if (clientId && clientLookup.has(String(clientId))) {
           const info = clientLookup.get(String(clientId))!;
           foundName = info.name;
@@ -102,7 +130,6 @@ export const opaService = {
           if (!foundPhone) foundPhone = info.phone;
         }
 
-        // Fallbacks diretos
         if (!foundName || foundName.toUpperCase() === 'CLIENTE') {
           foundName = t.id_cliente?.nome || t.id_contato?.nome || t.cliente_nome || '';
         }
@@ -110,7 +137,6 @@ export const opaService = {
           foundPhone = t.id_contato?.fones?.[0]?.numero || t.cliente_fone || t.contato_fone || '';
         }
 
-        // Função de detecção de "Lixo"
         const isJunk = (str: string) => {
           if (!str) return true;
           const s = str.trim().toUpperCase();
@@ -125,17 +151,22 @@ export const opaService = {
                  (s.length >= 8 && /^\d+$/.test(s)); 
         };
 
-        // --- HIERARQUIA FINAL ---
         let finalDisplayName = foundName;
-        
-        // Se o nome é junk ou vazio, USA O TELEFONE
+        let isPhoneDisplay = false;
+
         if (isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone;
+          isPhoneDisplay = true;
         }
 
-        // Se o telefone também for junk (o que não deve ocorrer no WhatsApp), usa o que sobrou, menos o protocolo
         if (!finalDisplayName || isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone || 'Sem Nome';
+          isPhoneDisplay = !!foundPhone;
+        }
+
+        // Se o nome de exibição for apenas números, formatamos como telefone
+        if (/^\d+$/.test(finalDisplayName.replace(/\D/g, '')) && (finalDisplayName.length >= 8)) {
+          finalDisplayName = formatPhone(finalDisplayName);
         }
 
         let finalAttendant = undefined;
@@ -148,7 +179,7 @@ export const opaService = {
           id: String(t._id || t.id),
           protocol,
           clientName: String(finalDisplayName).trim(),
-          contact: foundPhone,
+          contact: formatPhone(foundPhone),
           waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished')
             ? calculateDuration(t.date, t.fim)
