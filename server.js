@@ -52,15 +52,25 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-// Nova função de requisição que usa Query Params para GET (Essencial para o Opa Suite)
+// Função de requisição otimizada para o padrão de filtros do Opa Suite
 function opaRequest(baseUrl, path, token, params = {}) {
   return new Promise((resolve) => {
     try {
       const url = new URL(`${baseUrl}${path}`);
       
-      // No Opa Suite, filter e options devem ir na URL como strings JSON
-      if (params.filter) url.searchParams.append('filter', JSON.stringify(params.filter));
-      if (params.options) url.searchParams.append('options', JSON.stringify(params.options));
+      // O Opa Suite espera um único objeto "filter" contendo everything
+      const loopbackFilter = {
+        where: params.filter || {},
+        limit: params.options?.limit || 1000,
+        skip: params.options?.skip || 0,
+        // Converte "-_id" para "_id DESC" ou usa o padrão
+        order: params.options?.sort ? 
+          (params.options.sort.startsWith('-') ? `${params.options.sort.substring(1)} DESC` : `${params.options.sort} ASC`) : 
+          "_id DESC",
+        populate: params.options?.populate || []
+      };
+
+      url.searchParams.append('filter', JSON.stringify(loopbackFilter));
 
       const lib = url.protocol === 'https:' ? https : http;
       const options = {
@@ -81,7 +91,13 @@ function opaRequest(baseUrl, path, token, params = {}) {
         res.on('end', () => {
           try { 
             const parsed = JSON.parse(data);
-            resolve({ ok: res.statusCode < 300, data: parsed }); 
+            // Se houver erro na resposta da API
+            if (res.statusCode >= 400) {
+                console.error(`[OpaAPI Error ${res.statusCode}]`, parsed);
+                resolve({ ok: false, error: parsed });
+            } else {
+                resolve({ ok: true, data: parsed }); 
+            }
           }
           catch (e) { resolve({ ok: false, error: 'JSON Parse Error' }); }
         });
@@ -138,7 +154,7 @@ app.get('/api/dashboard-data', async (req, res) => {
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
     const robotId = '5d1642ad4b16a50312cc8f4d';
 
-    // Buscamos em paralelo usando a nova função opaRequest (via URL Params)
+    // Buscamos em paralelo usando a nova estrutura de filtro unificado
     const [activeRes, h1, h2, h3, uRes, clientRes, contactRes] = await Promise.all([
       opaRequest(baseUrl, '/api/v1/atendimento', token, {
         filter: { status: { "$ne": "F" }, id_atendente: { "$ne": robotId } },
@@ -170,14 +186,19 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const getList = (res) => {
       if (!res.ok) return [];
-      return res.data.data || res.data || [];
+      // No Opa Suite v1, os dados vem em res.data.data ou direto no res.data
+      const data = res.data;
+      if (data && data.data) return data.data;
+      if (Array.isArray(data)) return data;
+      return [];
     };
 
-    const allHistory = [...getList(h1), ...getList(h2), ...getList(h3)];
+    const activeList = getList(activeRes);
+    const historyList = [...getList(h1), ...getList(h2), ...getList(h3)];
 
     res.json({
       success: true,
-      tickets: [...getList(activeRes), ...allHistory],
+      tickets: [...activeList, ...historyList],
       attendants: getList(uRes),
       clients: getList(clientRes),
       contacts: getList(contactRes)
