@@ -74,7 +74,7 @@ async function opaRequest(baseUrl, path, token, body = {}) {
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         rejectUnauthorized: false,
-        timeout: 25000 
+        timeout: 45000 // Aumentado timeout para grandes volumes
       };
 
       const req = lib.request(options, (res) => {
@@ -156,30 +156,34 @@ app.get('/api/dashboard-data', async (req, res) => {
     
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // 1. ATIVOS
+    // 1. ATIVOS (Limite menor pois são poucos)
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: { status: { $ne: 'F' } },
       options: { limit: 1000, sort: { date: -1 } }
     });
 
-    // 2. FINALIZADOS
+    // 2. FINALIZADOS (Limite alto e projeção de campos)
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
         date: { $gte: dateFilter }, 
         id_atendente: { $ne: ROBOT_ID }
       },
-      options: { limit: 3000, sort: { date: -1 } }
+      options: { 
+        limit: 15000, // Limite aumentado drasticamente
+        sort: { date: -1 }, // Garantir que venham os mais recentes primeiro se estourar o limite
+        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
+      }
     });
 
     // 3. USUÁRIOS
     const userRes = await opaRequest(baseUrl, '/usuario', token, {
-      options: { limit: 300 }
+      options: { limit: 500 }
     });
 
     // 4. DEPARTAMENTOS
     const deptRes = await opaRequest(baseUrl, '/departamento', token, {
-        options: { limit: 300 }
+        options: { limit: 500 }
     });
 
     // 5. PERÍODOS
@@ -221,6 +225,7 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     res.json({
       success: true,
+      ticketsCount: { active: activeTickets.length, finished: finishedTickets.length },
       tickets: [...activeTickets, ...finishedTickets],
       attendants: attendants,
       departments: departments,
