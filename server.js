@@ -52,6 +52,46 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
+// Nova função de requisição que usa Query Params para GET (Essencial para o Opa Suite)
+function opaRequest(baseUrl, path, token, params = {}) {
+  return new Promise((resolve) => {
+    try {
+      const url = new URL(`${baseUrl}${path}`);
+      
+      // No Opa Suite, filter e options devem ir na URL como strings JSON
+      if (params.filter) url.searchParams.append('filter', JSON.stringify(params.filter));
+      if (params.options) url.searchParams.append('options', JSON.stringify(params.options));
+
+      const lib = url.protocol === 'https:' ? https : http;
+      const options = {
+        method: 'GET',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
+        },
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname + url.search,
+        rejectUnauthorized: false
+      };
+
+      const req = lib.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try { 
+            const parsed = JSON.parse(data);
+            resolve({ ok: res.statusCode < 300, data: parsed }); 
+          }
+          catch (e) { resolve({ ok: false, error: 'JSON Parse Error' }); }
+        });
+      });
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      req.end();
+    } catch (e) { resolve({ ok: false, error: e.message }); }
+  });
+}
+
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -85,42 +125,6 @@ app.post('/api/settings', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false }); }
 });
 
-function requestWithBody(urlStr, method, token, bodyData = null) {
-  return new Promise((resolve) => {
-    try {
-      const url = new URL(urlStr);
-      const lib = url.protocol === 'https:' ? https : http;
-      const bodyString = bodyData ? JSON.stringify(bodyData) : '';
-      const options = {
-        method,
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Content-Type': 'application/json', 
-          'Content-Length': Buffer.byteLength(bodyString) 
-        },
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: url.pathname + url.search,
-        rejectUnauthorized: false
-      };
-      const req = lib.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => data += chunk);
-        res.on('end', () => {
-          try { 
-            const parsed = JSON.parse(data);
-            resolve({ ok: res.statusCode < 300, data: parsed }); 
-          }
-          catch (e) { resolve({ ok: false, error: 'JSON Parse Error' }); }
-        });
-      });
-      req.on('error', (e) => resolve({ ok: false, error: e.message }));
-      if (bodyString) req.write(bodyString);
-      req.end();
-    } catch (e) { resolve({ ok: false, error: e.message }); }
-  });
-}
-
 app.get('/api/dashboard-data', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
@@ -134,38 +138,33 @@ app.get('/api/dashboard-data', async (req, res) => {
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
     const robotId = '5d1642ad4b16a50312cc8f4d';
 
-    // Usamos -_id pois é garantido cronológico no Opa Suite.
-    // Buscamos 3 páginas de finalizados (3000 registros humanos) para cobrir o mês e HOJE.
+    // Buscamos em paralelo usando a nova função opaRequest (via URL Params)
     const [activeRes, h1, h2, h3, uRes, clientRes, contactRes] = await Promise.all([
-      // Ativos (Fila + Atendendo agora)
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": { "$ne": "F" }, "id_atendente": { "$ne": robotId } },
-        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
+      opaRequest(baseUrl, '/api/v1/atendimento', token, {
+        filter: { status: { "$ne": "F" }, id_atendente: { "$ne": robotId } },
+        options: { limit: 1000, populate: populate, sort: "-_id" }
       }),
-      // Página 1: Últimos 1000 finalizados (Traz HOJE)
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": "F", "id_atendente": { "$ne": robotId } },
-        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
+      opaRequest(baseUrl, '/api/v1/atendimento', token, {
+        filter: { status: "F", id_atendente: { "$ne": robotId } },
+        options: { limit: 1000, populate: populate, sort: "-_id" }
       }),
-      // Página 2: De 1001 a 2000
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": "F", "id_atendente": { "$ne": robotId } },
-        "options": { "limit": 1000, "skip": 1000, "populate": populate, "sort": "-_id" }
+      opaRequest(baseUrl, '/api/v1/atendimento', token, {
+        filter: { status: "F", id_atendente: { "$ne": robotId } },
+        options: { limit: 1000, skip: 1000, populate: populate, sort: "-_id" }
       }),
-      // Página 3: De 2001 a 3000 (Garante o histórico para o ranking)
-      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { "status": "F", "id_atendente": { "$ne": robotId } },
-        "options": { "limit": 1000, "skip": 2000, "populate": populate, "sort": "-_id" }
+      opaRequest(baseUrl, '/api/v1/atendimento', token, {
+        filter: { status: "F", id_atendente: { "$ne": robotId } },
+        options: { limit: 1000, skip: 2000, populate: populate, sort: "-_id" }
       }),
-      requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
-        "filter": { "status": "A" },
-        "options": { "limit": 200 }
+      opaRequest(baseUrl, '/api/v1/usuario', token, {
+        filter: { status: "A" },
+        options: { limit: 200 }
       }),
-      requestWithBody(`${baseUrl}/api/v1/cliente`, 'GET', token, {
-        "options": { "limit": 1000, "sort": "-_id" }
+      opaRequest(baseUrl, '/api/v1/cliente', token, {
+        options: { limit: 1000, sort: "-_id" }
       }),
-      requestWithBody(`${baseUrl}/api/v1/contato`, 'GET', token, {
-        "options": { "limit": 1000, "sort": "-_id" }
+      opaRequest(baseUrl, '/api/v1/contato', token, {
+        options: { limit: 1000, sort: "-_id" }
       })
     ]);
 
