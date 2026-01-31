@@ -51,10 +51,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-/**
- * Realiza requisições para o Opa Suite seguindo a documentação:
- * GET com Body contendo { filter, options }
- */
 async function opaRequest(baseUrl, path, token, body = {}) {
   return new Promise((resolve) => {
     try {
@@ -78,7 +74,7 @@ async function opaRequest(baseUrl, path, token, body = {}) {
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         rejectUnauthorized: false,
-        timeout: 20000 // Aumentado timeout para buscas maiores (1000 registros)
+        timeout: 25000 
       };
 
       const req = lib.request(options, (res) => {
@@ -88,24 +84,18 @@ async function opaRequest(baseUrl, path, token, body = {}) {
           try { 
             const parsed = JSON.parse(data);
             if (res.statusCode >= 400) {
-                console.error(`[OpaAPI Error ${res.statusCode}]`, data.substring(0, 200));
                 resolve({ ok: false, error: parsed, status: res.statusCode });
             } else {
                 resolve({ ok: true, data: parsed }); 
             }
           }
           catch (e) { 
-            console.error(`[OpaAPI Parse Error]`, data.substring(0, 100));
             resolve({ ok: false, error: 'JSON Parse Error', raw: data }); 
           }
         });
       });
 
-      req.on('error', (e) => {
-        console.error(`[OpaAPI Conn Error]`, e.message);
-        resolve({ ok: false, error: e.message });
-      });
-
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
       req.on('timeout', () => {
         req.destroy();
         resolve({ ok: false, error: 'Timeout' });
@@ -159,43 +149,40 @@ app.get('/api/dashboard-data', async (req, res) => {
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     const token = config.api_token;
 
-    // Calcula o primeiro dia do mês atual (ex: 2024-05-01)
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    // Formata manualmente para evitar fuso horário invertendo o dia
     const yyyy = firstDayOfMonth.getFullYear();
     const mm = String(firstDayOfMonth.getMonth() + 1).padStart(2, '0');
     const dd = "01";
     const dateFilter = `${yyyy}-${mm}-${dd}`;
 
-    console.log(`[Proxy] Solicitando atendimentos do mês: ${dateFilter} com limite de 1000`);
+    const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // Busca atendimentos com o novo limite e filtro de data do mês
+    console.log(`[Proxy] Buscando 1000 tickets RECENTES do mês (${dateFilter}) excluindo robô.`);
+
+    // CHAMADA COM ORDENAÇÃO DECRESCENTE E FILTRO DE EXCLUSÃO
     const ticketRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
-        dataInicialAbertura: dateFilter
+        dataInicialAbertura: dateFilter,
+        id_atendente: { $ne: ROBOT_ID } // Tenta excluir o robô na fonte (API)
       },
       options: {
-        limit: 1000 // Limite aumentado conforme solicitado
+        limit: 1000,
+        sort: { date: -1 } // ORDENAÇÃO DECRESCENTE: Pega os mais novos primeiro
       }
     });
 
-    // Busca usuários (atendentes) sem filtro de status A para garantir mapeamento de nomes antigos
     const userRes = await opaRequest(baseUrl, '/usuario', token, {
       options: { limit: 300 }
     });
 
     const getList = (res) => {
-      if (res.ok && res.data?.status === "success") {
-        return res.data.data || [];
-      }
+      if (res.ok && res.data?.status === "success") return res.data.data || [];
       return Array.isArray(res.data) ? res.data : [];
     };
 
     const allTickets = getList(ticketRes);
     const attendants = getList(userRes);
-
-    console.log(`[Proxy] Sucesso: ${allTickets.length} tickets e ${attendants.length} atendentes carregados.`);
 
     res.json({
       success: true,
@@ -204,7 +191,6 @@ app.get('/api/dashboard-data', async (req, res) => {
     });
 
   } catch (error) { 
-    console.error("[Proxy Error]", error.message);
     res.status(500).json({ success: false, error: error.message }); 
   }
 });
