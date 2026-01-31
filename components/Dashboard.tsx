@@ -1,9 +1,9 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { Ticket, Attendant } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
-import { Clock, Users, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, Trophy, BarChart3, Medal, Star, ShieldAlert, ListFilter } from 'lucide-react';
+import { Clock, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, BarChart3, Star, ListFilter } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
@@ -45,16 +45,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // Mapeamento de Setores x Status para o "Log" solicitado
-    const deptLog: Record<string, { name: string, id: string, bot: number, waiting: number }> = {};
+    // Mapeamento de Setores x Status para o Log (F12)
+    const deptLog: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
     tickets.forEach(t => {
       if (t.status === 'bot' || t.status === 'waiting') {
         const key = t.departmentId || 'unassigned';
         if (!deptLog[key]) {
-          deptLog[key] = { name: t.department || 'Desconhecido', id: t.departmentId || 'N/A', bot: 0, waiting: 0 };
+          deptLog[key] = { setor: t.department || 'Desconhecido', id_setor: t.departmentId || 'N/A', bot: 0, aguardando: 0 };
         }
         if (t.status === 'bot') deptLog[key].bot++;
-        if (t.status === 'waiting') deptLog[key].waiting++;
+        if (t.status === 'waiting') deptLog[key].aguardando++;
       }
     });
 
@@ -69,7 +69,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const ranking = Object.entries(rankingMap)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
+      .slice(0, 10); // Aumentado para 10 no ranking já que tem mais espaço
 
     const topTechnician = ranking.length > 0 ? ranking[0] : null;
 
@@ -92,6 +92,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       departmentLog: Object.values(deptLog)
     };
   }, [tickets, attendants]);
+
+  // Efeito para imprimir o Log no F12
+  useEffect(() => {
+    if (stats.departmentLog.length > 0) {
+      console.group("📊 DIAGNÓSTICO DE SETORES (IDs e Status)");
+      console.log("Use esta tabela para identificar quais setores precisam de ajuste de filtro.");
+      console.table(stats.departmentLog);
+      console.groupEnd();
+    }
+  }, [stats.departmentLog]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
@@ -152,81 +162,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         />
       </div>
 
-      {/* Seção de Ranking e Diagnóstico de Setores */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Gráfico de Ranking */}
-        <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-sky-500" />
-              Ranking de Finalizações (Mês)
-            </h3>
-          </div>
-          
-          <div className="h-[250px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.ranking} layout="vertical" margin={{ left: 20, right: 30 }}>
-                <XAxis type="number" hide />
-                <YAxis 
-                  dataKey="name" 
-                  type="category" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#94a3b8', fontSize: 11 }}
-                  width={100}
-                />
-                <Tooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                  contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
-                />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={20}>
-                  {stats.ranking.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index === 0 ? '#38bdf8' : '#0ea5e9'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+      {/* Gráfico de Ranking - Ocupa agora toda a largura disponível */}
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-sky-500" />
+            Ranking de Finalizações (Mês)
+          </h3>
+          <div className="text-[10px] text-slate-500 uppercase flex items-center gap-2">
+            <ListFilter className="w-3 h-3" />
+            Logs de ID disponíveis no Console (F12)
           </div>
         </div>
-
-        {/* Log de Diagnóstico de Setores */}
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <ListFilter className="w-5 h-5 text-amber-500" />
-              Diagnóstico de Setores
-            </h3>
-          </div>
-          <p className="text-[10px] text-slate-500 uppercase mb-4 font-bold">Cruzamento de ID e Status Triagem</p>
-          
-          <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
-            {stats.departmentLog.length > 0 ? stats.departmentLog.map((log) => (
-              <div key={log.id} className="bg-slate-900/40 border border-slate-700/50 p-3 rounded-lg">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="text-xs font-bold text-slate-200 truncate max-w-[140px]">{log.name}</span>
-                  <span className="text-[9px] font-mono bg-slate-800 px-1.5 py-0.5 rounded text-slate-500">ID: {log.id}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-center">
-                  <div className="bg-violet-500/10 border border-violet-500/20 py-1 rounded">
-                    <p className="text-[8px] uppercase text-violet-400 font-bold">Bot</p>
-                    <p className="text-sm font-bold text-violet-300">{log.bot}</p>
-                  </div>
-                  <div className="bg-amber-500/10 border border-amber-500/20 py-1 rounded">
-                    <p className="text-[8px] uppercase text-amber-400 font-bold">Espera</p>
-                    <p className="text-sm font-bold text-amber-300">{log.waiting}</p>
-                  </div>
-                </div>
-              </div>
-            )) : (
-              <div className="flex-1 flex items-center justify-center text-slate-600 text-xs italic">
-                Sem dados de triagem no momento
-              </div>
-            )}
-          </div>
-          <div className="mt-4 p-2 bg-sky-500/5 rounded border border-sky-500/10 text-[9px] text-sky-400 leading-tight">
-             Use estes IDs para ajustar os filtros de triagem se necessário.
-          </div>
+        
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={stats.ranking} layout="vertical" margin={{ left: 20, right: 30 }}>
+              <XAxis type="number" hide />
+              <YAxis 
+                dataKey="name" 
+                type="category" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                width={120}
+              />
+              <Tooltip 
+                cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
+              />
+              <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={24}>
+                {stats.ranking.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={index === 0 ? '#38bdf8' : '#0ea5e9'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
