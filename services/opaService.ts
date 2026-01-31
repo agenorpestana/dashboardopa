@@ -40,27 +40,28 @@ export const opaService = {
       const rawClients = result.clients || [];
       const rawContacts = result.contacts || [];
 
-      // Dicionários de Nomes e Telefones de Clientes
+      // Dicionário de Clientes
       const clientLookup = new Map<string, {name: string, phone: string}>();
       rawClients.forEach((c: any) => {
         const id = String(c._id || c.id);
+        const phone = c.fone || c.telefone || c.whatsapp || c.celular || '';
         clientLookup.set(id, {
           name: c.nome || '',
-          phone: c.fone || c.telefone || c.whatsapp || c.celular || c.cpf_cnpj || ''
+          phone: phone
         });
       });
 
-      // Dicionários de Nomes e Telefones de Contatos
+      // Dicionário de Contatos
       const contactLookup = new Map<string, {name: string, phone: string}>();
       rawContacts.forEach((c: any) => {
         const id = String(c._id || c.id);
-        let phone = '';
-        if (c.fones && Array.isArray(c.fones) && c.fones.length > 0) {
+        let phone = c.whatsapp || c.celular || '';
+        if (!phone && c.fones && Array.isArray(c.fones) && c.fones.length > 0) {
           phone = c.fones[0].numero || c.fones[0].fone || '';
         }
         contactLookup.set(id, {
           name: c.nome || '',
-          phone: phone || c.whatsapp || c.celular || c.email_principal || ''
+          phone: phone
         });
       });
 
@@ -89,7 +90,7 @@ export const opaService = {
         const clientId = typeof t.id_cliente === 'object' ? t.id_cliente?._id : t.id_cliente;
         const contactId = typeof t.id_contato === 'object' ? t.id_contato?._id : t.id_contato;
 
-        // Tenta buscar nos Mapas
+        // 1. Busca nos mapas de cache
         if (clientId && clientLookup.has(String(clientId))) {
           const info = clientLookup.get(String(clientId))!;
           foundName = info.name;
@@ -98,37 +99,41 @@ export const opaService = {
 
         if (contactId && contactLookup.has(String(contactId))) {
           const info = contactLookup.get(String(contactId))!;
-          if (!foundName) foundName = info.name;
+          if (!foundName || foundName.toUpperCase() === 'CLIENTE') foundName = info.name;
           if (!foundPhone) foundPhone = info.phone;
         }
 
-        // Tenta buscar em propriedades diretas do ticket
-        if (!foundName) foundName = t.cliente_nome || t.contato_nome || (t.id_cliente?.nome) || (t.id_contato?.nome) || '';
-        if (!foundPhone) foundPhone = t.cliente_fone || t.contato_fone || (t.id_contato?.fones?.[0]?.numero) || '';
+        // 2. Fallback para dados diretos no ticket
+        if (!foundName || foundName.toUpperCase() === 'CLIENTE') {
+          foundName = t.cliente_nome || t.contato_nome || t.id_cliente?.nome || t.id_contato?.nome || '';
+        }
+        if (!foundPhone) {
+          foundPhone = t.cliente_fone || t.contato_fone || t.id_contato?.fones?.[0]?.numero || '';
+        }
 
-        // Função para detectar se a string é lixo/protocolo
+        // 3. Validação de Junk (Protocolos ou nomes vazios)
         const isJunk = (str: string) => {
           if (!str) return true;
           const s = str.trim().toUpperCase();
-          // Detecta se é o próprio protocolo, padrões comuns ou sequências numéricas muito longas (IDs internos)
           return s === 'CLIENTE' || 
                  s === 'ANONIMO' || 
                  s === protocol.toUpperCase() || 
                  /^(ITL|OPA|PRT)\d+/.test(s) || 
-                 (s.length >= 10 && /^\d+$/.test(s)); // Sequência numérica longa (provável ID)
+                 (s.length >= 10 && /^\d+$/.test(s));
         };
 
-        // Decisão Hierárquica Final: Nome Real -> Telefone -> "Cliente"
+        // --- LÓGICA FINAL DE EXIBIÇÃO ---
+        // Prioridade: NOME REAL -> TELEFONE
         let finalDisplayName = foundName;
         
-        // Se o nome for lixo, tenta o telefone
+        // Se o nome é junk ou "Cliente", usamos o telefone
         if (isJunk(finalDisplayName)) {
           finalDisplayName = foundPhone;
         }
-        
-        // Se após tentar o telefone ainda for lixo ou vazio, usa placeholder genérico (NUNCA o protocolo)
-        if (isJunk(finalDisplayName)) {
-          finalDisplayName = 'Cliente';
+
+        // Se mesmo assim estiver vazio (raro no WhatsApp), usamos um traço ou espaço, mas evitamos o protocolo
+        if (!finalDisplayName || isJunk(finalDisplayName)) {
+          finalDisplayName = foundPhone || 'Sem Identificação';
         }
 
         // --- RESOLUÇÃO DO ATENDENTE ---
