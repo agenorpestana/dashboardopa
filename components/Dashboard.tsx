@@ -1,6 +1,6 @@
 
 import React, { useMemo, useEffect } from 'react';
-import { Ticket, Attendant } from '../types';
+import { Ticket, Attendant, Department } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
 import { Clock, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, BarChart3, Star, ListFilter } from 'lucide-react';
@@ -9,6 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 interface DashboardProps {
   tickets: Ticket[];
   attendants: Attendant[];
+  departments: Department[];
 }
 
 const formatTime = (seconds: number) => {
@@ -19,7 +20,7 @@ const formatTime = (seconds: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, departments }) => {
   const stats = useMemo(() => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -45,9 +46,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // 1. Resumo por Setor (Tabela 1 no console)
+    // 1. Resumo por Setor baseado em tickets ativos
     const deptSummary: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
-    // 2. Detalhado por Chamado (Tabela 2 no console)
     const detailedLogs: any[] = [];
 
     tickets.forEach(t => {
@@ -69,7 +69,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       }
     });
 
-    // Ranking de Atendentes (Mensal)
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
        if (t.attendantName) {
@@ -104,19 +103,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     };
   }, [tickets, attendants]);
 
-  // Efeito para imprimir o Log detalhado no F12
+  // Efeito para imprimir todos os logs no F12
   useEffect(() => {
-    if (stats.detailedLogs.length > 0) {
-      console.clear();
-      console.group("📊 DIAGNÓSTICO DE TRIAGEM (F12)");
-      console.log("--- RESUMO POR SETOR ---");
-      console.table(stats.departmentSummary);
-      console.log("--- CRUZAMENTO DETALHADO (Chamado x ID Setor) ---");
-      console.table(stats.detailedLogs);
-      console.log("DICA: Use os IDs de setor acima para ajustar os filtros de triagem se necessário.");
-      console.groupEnd();
+    console.clear();
+    console.group("📂 OPA SUITE - MASTER LOG (F12)");
+    
+    // LISTA COMPLETA DE SETORES (O que você pediu)
+    if (departments.length > 0) {
+      console.log("%c--- LISTA COMPLETA DE SETORES (MASTER LIST) ---", "color: #38bdf8; font-weight: bold;");
+      const masterList = departments.map(d => ({ "ID DO SETOR": d.id, "NOME DO SETOR": d.name }));
+      console.table(masterList);
     }
-  }, [stats.detailedLogs, stats.departmentSummary]);
+
+    // DIAGNÓSTICO DE TRIAGEM ATUAL
+    if (stats.detailedLogs.length > 0) {
+      console.log("%c--- RESUMO DE TRIAGEM ATIVA ---", "color: #fbbf24; font-weight: bold;");
+      console.table(stats.departmentSummary);
+      console.log("%c--- CHAMADOS EM TRIAGEM DETALHADOS ---", "color: #fbbf24; font-weight: bold;");
+      console.table(stats.detailedLogs);
+    }
+
+    console.log("%cDICA: Use a Master List para conferir IDs de setores que não estão aparecendo na triagem ativa.", "color: #94a3b8; font-style: italic;");
+    console.groupEnd();
+  }, [departments, stats.detailedLogs, stats.departmentSummary]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
@@ -186,7 +195,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
           </h3>
           <div className="text-[10px] text-slate-500 uppercase flex items-center gap-2">
             <ListFilter className="w-3 h-3" />
-            Logs de ID detalhados no Console (F12)
+            Master List de IDs disponível no Console (F12)
           </div>
         </div>
         

@@ -1,25 +1,23 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { Settings } from './components/Settings';
 import { opaService } from './services/opaService';
-import { Ticket, Attendant, AppConfig } from './types';
+import { Ticket, Attendant, AppConfig, Department } from './types';
 import { ChevronRight } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'dashboard' | 'settings'>('dashboard');
-  
-  // Estado para controlar a visibilidade da sidebar. Padrão false (escondido).
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  
   const [config, setConfig] = useState<AppConfig>({ apiUrl: '', apiToken: '' });
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [attendants, setAttendants] = useState<Attendant[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
-  // Fetch Config from Database on Load
   useEffect(() => {
     const fetchConfig = async () => {
       try {
@@ -40,18 +38,15 @@ const App: React.FC = () => {
     fetchConfig();
   }, []);
 
-  // Data fetching logic
   const refreshData = useCallback(async () => {
-    // Wait for config to be loaded
     if (!configLoaded) return;
-    
-    // Only show loading on initial fetch or settings change, not polling
     if (tickets.length === 0) setLoading(true);
     
     try {
       const data = await opaService.fetchData(config);
       setTickets(data.tickets);
       setAttendants(data.attendants);
+      setDepartments(data.departments);
       setLastUpdate(new Date());
     } catch (error) {
       console.error("Failed to fetch dashboard data", error);
@@ -60,24 +55,20 @@ const App: React.FC = () => {
     }
   }, [config, tickets.length, configLoaded]);
 
-  // Initial fetch and polling interval
   useEffect(() => {
     if (configLoaded) {
       refreshData();
-      const intervalId = setInterval(refreshData, 30000); // Update every 30 seconds
+      const intervalId = setInterval(refreshData, 30000); 
       return () => clearInterval(intervalId);
     }
   }, [refreshData, configLoaded]);
 
   const handleSaveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
-    // Refresh logic will pick up the change due to dependency array
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-sky-500/30">
-      
-      {/* Mobile Overlay Background */}
       <div className="fixed inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none z-0"></div>
 
       <Sidebar 
@@ -87,7 +78,6 @@ const App: React.FC = () => {
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
       />
 
-      {/* Conteúdo Principal com transição de padding */}
       <main 
         className={`transition-all duration-300 relative z-10 ${
           isSidebarOpen ? 'pl-64' : 'pl-0'
@@ -95,8 +85,6 @@ const App: React.FC = () => {
       >
         <header className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 px-6 flex items-center justify-between transition-all">
           <div className="flex items-center gap-4">
-            
-            {/* Botão Setinha para Direita (Aparece apenas se a sidebar estiver fechada) */}
             {!isSidebarOpen && (
               <button 
                 onClick={() => setIsSidebarOpen(true)}
@@ -135,7 +123,7 @@ const App: React.FC = () => {
           ) : (
             <>
               {currentView === 'dashboard' && (
-                <Dashboard tickets={tickets} attendants={attendants} />
+                <Dashboard tickets={tickets} attendants={attendants} departments={departments} />
               )}
               {currentView === 'settings' && (
                 <Settings config={config} onSave={handleSaveConfig} />

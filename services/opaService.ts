@@ -1,5 +1,5 @@
 
-import { Ticket, Attendant, AppConfig, TicketStatus } from '../types';
+import { Ticket, Attendant, AppConfig, TicketStatus, Department } from '../types';
 
 function toTimestamp(dateVal: any): number {
   if (!dateVal) return 0;
@@ -40,22 +40,27 @@ function determineTicketStatus(t: any): TicketStatus {
 }
 
 export const opaService = {
-  fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[] }> => {
-    if (!config.apiUrl) return { tickets: [], attendants: [] };
+  fetchData: async (config: AppConfig): Promise<{ tickets: Ticket[], attendants: Attendant[], departments: Department[] }> => {
+    if (!config.apiUrl) return { tickets: [], attendants: [], departments: [] };
     
     try {
       const response = await fetch('/api/dashboard-data');
-      if (!response.ok) return { tickets: [], attendants: [] };
+      if (!response.ok) return { tickets: [], attendants: [], departments: [] };
       
       const result = await response.json();
-      if (!result.success) return { tickets: [], attendants: [] };
+      if (!result.success) return { tickets: [], attendants: [], departments: [] };
       
       const rawTickets = result.tickets || [];
       const rawAttendants = result.attendants || [];
       const rawDepts = result.departments || [];
 
-      // Criar Mapas para busca rápida
-      const deptMap = new Map(rawDepts.map((d: any) => [String(d._id || d.id), d.nome]));
+      // Mapear Departamentos
+      const departments: Department[] = rawDepts.map((d: any) => ({
+        id: String(d._id || d.id),
+        name: d.nome || 'Sem Nome'
+      }));
+
+      const deptMap = new Map(departments.map(d => [d.id, d.name]));
 
       const attendants: Attendant[] = rawAttendants.map((a: any) => ({
         id: String(a._id || a.id),
@@ -69,12 +74,10 @@ export const opaService = {
       const tickets: Ticket[] = rawTickets.map((t: any) => {
         const status = determineTicketStatus(t);
         
-        // Identificar Atendente
         const attObj = t.id_atendente;
         const attId = typeof attObj === 'object' ? String(attObj?._id || '') : String(attObj || '');
         const attName = (typeof attObj === 'object' ? String(attObj?.nome || '') : '') || attendantNameMap.get(attId);
 
-        // Identificar Cliente (Evitar protocolos no nome)
         let clientDisplayName = '';
         const rawName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined);
         if (rawName && isNaN(Number(String(rawName).replace(/\s/g, '').replace(/\D/g, '')))) {
@@ -85,7 +88,6 @@ export const opaService = {
           clientDisplayName = phonePart.length > 5 ? formatPhone(phonePart) : 'Cliente';
         }
 
-        // Identificar Setor/Departamento
         const deptObj = t.id_motivo_atendimento || t.id_setor;
         const deptId = typeof deptObj === 'object' ? String(deptObj?._id || '') : String(deptObj || '');
         const deptName = (typeof deptObj === 'object' ? String(deptObj?.motivo || deptObj?.nome || '') : '') || deptMap.get(deptId) || 'Geral';
@@ -113,10 +115,10 @@ export const opaService = {
         }
       });
 
-      return { tickets, attendants };
+      return { tickets, attendants, departments };
     } catch (e) {
       console.error("[OpaService] Error:", e);
-      return { tickets: [], attendants: [] };
+      return { tickets: [], attendants: [], departments: [] };
     }
   }
 };

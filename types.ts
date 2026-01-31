@@ -1,6 +1,11 @@
 
 export type TicketStatus = 'waiting' | 'in_service' | 'finished' | 'bot';
 
+export interface Department {
+  id: string;
+  name: string;
+}
+
 export interface Ticket {
   id: string;
   protocol: string;
