@@ -151,24 +151,31 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const yyyy = firstDayOfMonth.getFullYear();
-    const mm = String(firstDayOfMonth.getMonth() + 1).padStart(2, '0');
-    const dd = "01";
-    const dateFilter = `${yyyy}-${mm}-${dd}`;
-
+    const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    console.log(`[Proxy] Buscando 1000 tickets RECENTES do mês (${dateFilter}) excluindo robô.`);
+    console.log(`[Proxy] Executando busca em duas etapas...`);
 
-    // CHAMADA COM ORDENAÇÃO DECRESCENTE E FILTRO DE EXCLUSÃO
-    const ticketRes = await opaRequest(baseUrl, '/atendimento', token, {
+    // ETAPA 1: BUSCAR TODOS OS ATIVOS (STATUS != F)
+    // Isso garante que os cards de Espera, Atendimento e Bot nunca fiquem vazios
+    const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
+        status: { $ne: 'F' },
+        id_atendente: { $ne: ROBOT_ID }
+      }
+    });
+
+    // ETAPA 2: BUSCAR 1000 FINALIZADOS RECENTES (STATUS == F)
+    // Isso alimenta o Ranking e o TMA com os dados mais atuais do mês
+    const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
+      filter: {
+        status: 'F',
         dataInicialAbertura: dateFilter,
-        id_atendente: { $ne: ROBOT_ID } // Tenta excluir o robô na fonte (API)
+        id_atendente: { $ne: ROBOT_ID }
       },
       options: {
         limit: 1000,
-        sort: { date: -1 } // ORDENAÇÃO DECRESCENTE: Pega os mais novos primeiro
+        sort: { date: -1 } // Mais recentes primeiro
       }
     });
 
@@ -181,8 +188,14 @@ app.get('/api/dashboard-data', async (req, res) => {
       return Array.isArray(res.data) ? res.data : [];
     };
 
-    const allTickets = getList(ticketRes);
+    const activeTickets = getList(activeRes);
+    const finishedTickets = getList(finishedRes);
     const attendants = getList(userRes);
+
+    // Mesclar os resultados
+    const allTickets = [...activeTickets, ...finishedTickets];
+
+    console.log(`[Proxy] Ativos: ${activeTickets.length} | Finalizados: ${finishedTickets.length} (Total: ${allTickets.length})`);
 
     res.json({
       success: true,
