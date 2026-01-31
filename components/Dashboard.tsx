@@ -117,25 +117,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       console.table(periods.map(p => ({ "ID PERÍODO": p._id, "NOME": p.nome, "ATIVO": p.ativo })));
     }
 
-    // LOG DE VERIFICAÇÃO DE DATAS (FINALIZADOS)
     if (stats.finished.length > 0) {
       console.log("%c--- DIAGNÓSTICO DE ATENDIMENTOS FINALIZADOS ---", "color: #10b981; font-weight: bold;");
-      const first = stats.finished[0];
-      const last = stats.finished[stats.finished.length - 1];
+      
+      const ticketsWithTS = stats.finished.map(t => ({
+          ...t,
+          ts: new Date(String(t.createdAt).replace(' ', 'T')).getTime()
+      }));
+
+      const newest = ticketsWithTS.reduce((prev, curr) => prev.ts > curr.ts ? prev : curr);
+      const oldest = ticketsWithTS.reduce((prev, curr) => prev.ts < curr.ts ? prev : curr);
       
       console.log("Total carregado:", stats.finished.length);
-      console.log("Primeiro da lista (Mais recente):", {
-        Protocolo: first.protocol,
-        Abertura: first.createdAt,
-        Fechamento: first.closedAt,
-        Atendente: first.attendantName
+      console.log("%cChamado MAIS RECENTE detectado:", "color: #34d399;", {
+        Protocolo: newest.protocol,
+        Abertura: newest.createdAt,
+        Fechamento: newest.closedAt,
+        Atendente: newest.attendantName
       });
-      console.log("Último da lista (Mais antigo):", {
-        Protocolo: last.protocol,
-        Abertura: last.createdAt,
-        Fechamento: last.closedAt,
-        Atendente: last.attendantName
+      console.log("%cChamado MAIS ANTIGO detectado:", "color: #fb7185;", {
+        Protocolo: oldest.protocol,
+        Abertura: oldest.createdAt,
+        Fechamento: oldest.closedAt,
+        Atendente: oldest.attendantName
       });
+      
+      console.log("Posição 0 do array (Deve ser o mais recente):", stats.finished[0].protocol, stats.finished[0].createdAt);
     }
 
     if (stats.detailedLogs.length > 0) {
@@ -145,7 +152,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       console.table(stats.detailedLogs);
     }
 
-    console.log("%cDICA: Se a data do 'Último da lista' for de meses passados, o filtro por data no Opa Suite pode estar sendo ignorado pela versão da sua API.", "color: #f87171; font-weight: bold;");
     console.groupEnd();
   }, [departments, periods, stats.detailedLogs, stats.departmentSummary, stats.finished]);
 

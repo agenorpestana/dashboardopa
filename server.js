@@ -149,7 +149,6 @@ app.get('/api/dashboard-data', async (req, res) => {
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     const token = config.api_token;
 
-    // Formatar data para o padrão do OPA: YYYY-MM-DD 00:00:00
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -157,13 +156,13 @@ app.get('/api/dashboard-data', async (req, res) => {
     
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // 1. ATIVOS (Em espera, Bot, Em Atendimento)
+    // 1. ATIVOS
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: { status: { $ne: 'F' } },
       options: { limit: 1000, sort: { date: -1 } }
     });
 
-    // 2. FINALIZADOS (Usa o campo 'date' que é mais confiável com operadores de range)
+    // 2. FINALIZADOS
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
@@ -200,8 +199,14 @@ app.get('/api/dashboard-data', async (req, res) => {
       return attId === ROBOT_ID || attName.toLowerCase().includes('robô') || attName.toLowerCase().includes('robot');
     };
 
-    const rawActive = getList(activeRes);
-    const rawFinished = getList(finishedRes);
+    const sortByDateDesc = (a, b) => {
+        const dateA = new Date(String(a.date || '').replace(' ', 'T')).getTime();
+        const dateB = new Date(String(b.date || '').replace(' ', 'T')).getTime();
+        return dateB - dateA;
+    };
+
+    const rawActive = getList(activeRes).sort(sortByDateDesc);
+    const rawFinished = getList(finishedRes).sort(sortByDateDesc);
     const departments = getList(deptRes);
     const periods = getList(periodRes);
 
