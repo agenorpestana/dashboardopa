@@ -131,30 +131,29 @@ app.get('/api/dashboard-data', async (req, res) => {
     const baseUrl = config.api_url.replace(/\/$/, '');
     const token = config.api_token;
 
+    // Filtro de 30 dias para garantir o ranking mensal, mas limitaremos a busca para performance
     const dateLimit = new Date();
-    dateLimit.setDate(dateLimit.getDate() - 7);
+    dateLimit.setDate(dateLimit.getDate() - 30);
     const dateLimitStr = dateLimit.toISOString().split('T')[0];
 
     const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
     const robotId = '5d1642ad4b16a50312cc8f4d';
 
-    const [activeRes, historyRes, uRes, clientRes, contactRes] = await Promise.all([
-      // Atendimentos ativos (excluindo robô mas mantendo os que estão em fila sem atendente)
+    // Vamos buscar 2 páginas de finalizados para ter um histórico sólido (2000 registros humanos)
+    const [activeRes, historyRes1, historyRes2, uRes, clientRes, contactRes] = await Promise.all([
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { 
-          "status": { "$ne": "F" },
-          "id_atendente": { "$ne": robotId }
-        },
+        "filter": { "status": { "$ne": "F" }, "id_atendente": { "$ne": robotId } },
         "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
       }),
-      // Atendimentos finalizados (excluindo robô para ganhar espaço nos 1000 registros do limite da API)
+      // Página 1: Últimos 1000 finalizados (Ordenado por FIM decrescente para pegar HOJE primeiro)
       requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
-        "filter": { 
-          "status": "F", 
-          "dataInicialAbertura": dateLimitStr,
-          "id_atendente": { "$ne": robotId } // FILTRO DE ROBÔ APLICADO AQUI
-        },
-        "options": { "limit": 1000, "populate": populate, "sort": "-_id" }
+        "filter": { "status": "F", "dataInicialAbertura": { "$gte": dateLimitStr }, "id_atendente": { "$ne": robotId } },
+        "options": { "limit": 1000, "populate": populate, "sort": "-fim" }
+      }),
+      // Página 2: Próximos 1000 finalizados
+      requestWithBody(`${baseUrl}/api/v1/atendimento`, 'GET', token, {
+        "filter": { "status": "F", "dataInicialAbertura": { "$gte": dateLimitStr }, "id_atendente": { "$ne": robotId } },
+        "options": { "limit": 1000, "skip": 1000, "populate": populate, "sort": "-fim" }
       }),
       requestWithBody(`${baseUrl}/api/v1/usuario`, 'GET', token, {
         "filter": { "status": "A" },
@@ -173,9 +172,11 @@ app.get('/api/dashboard-data', async (req, res) => {
       return res.data.data || res.data || [];
     };
 
+    const allHistory = [...getList(historyRes1), ...getList(historyRes2)];
+
     res.json({
       success: true,
-      tickets: [...getList(activeRes), ...getList(historyRes)],
+      tickets: [...getList(activeRes), ...allHistory],
       attendants: getList(uRes),
       clients: getList(clientRes),
       contacts: getList(contactRes)
