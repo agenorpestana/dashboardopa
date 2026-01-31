@@ -153,16 +153,15 @@ app.get('/api/dashboard-data', async (req, res) => {
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const dateFilter = firstDayOfMonth.toISOString().split('T')[0];
     
-    // Identificação do Robô Victor
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-    // ETAPA 1: BUSCAR ATIVOS (Limitamos a 500 para performance)
+    // 1. ATIVOS
     const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: { status: { $ne: 'F' } },
       options: { limit: 500, sort: { date: -1 } }
     });
 
-    // ETAPA 2: BUSCAR FINALIZADOS (Apenas humanos)
+    // 2. FINALIZADOS
     const finishedRes = await opaRequest(baseUrl, '/atendimento', token, {
       filter: {
         status: 'F',
@@ -172,8 +171,14 @@ app.get('/api/dashboard-data', async (req, res) => {
       options: { limit: 1000, sort: { date: -1 } }
     });
 
+    // 3. USUÁRIOS
     const userRes = await opaRequest(baseUrl, '/usuario', token, {
       options: { limit: 300 }
+    });
+
+    // 4. DEPARTAMENTOS (SETORES) para o log de cruzamento
+    const deptRes = await opaRequest(baseUrl, '/departamento', token, {
+        options: { limit: 300 }
     });
 
     const getList = (res) => {
@@ -181,7 +186,6 @@ app.get('/api/dashboard-data', async (req, res) => {
       return Array.isArray(res.data) ? res.data : [];
     };
 
-    // Função rigorosa de limpeza de Robô
     const isRobot = (t) => {
       const attId = typeof t.id_atendente === 'object' ? String(t.id_atendente?._id || '') : String(t.id_atendente || '');
       const attName = typeof t.id_atendente === 'object' ? String(t.id_atendente?.nome || '') : '';
@@ -190,24 +194,22 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     const rawActive = getList(activeRes);
     const rawFinished = getList(finishedRes);
+    const departments = getList(deptRes);
 
-    // Filtramos ativos removendo qualquer ticket do robô que possa ter vindo
     const activeTickets = rawActive.filter(t => !isRobot(t));
     const finishedTickets = rawFinished.filter(t => !isRobot(t));
     
-    // Filtramos lista de atendentes removendo o robô Victor da lista oficial
     const attendants = getList(userRes).filter(a => {
         const id = String(a._id || a.id);
         const nome = String(a.nome || '');
         return id !== ROBOT_ID && !nome.toLowerCase().includes('robô');
     });
 
-    const allTickets = [...activeTickets, ...finishedTickets];
-
     res.json({
       success: true,
-      tickets: allTickets,
-      attendants: attendants
+      tickets: [...activeTickets, ...finishedTickets],
+      attendants: attendants,
+      departments: departments
     });
 
   } catch (error) { 

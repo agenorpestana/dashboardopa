@@ -45,16 +45,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    // Mapeamento de Setores x Status para o Log (F12)
-    const deptLog: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
+    // 1. Resumo por Setor (Tabela 1 no console)
+    const deptSummary: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
+    // 2. Detalhado por Chamado (Tabela 2 no console)
+    const detailedLogs: any[] = [];
+
     tickets.forEach(t => {
       if (t.status === 'bot' || t.status === 'waiting') {
         const key = t.departmentId || 'unassigned';
-        if (!deptLog[key]) {
-          deptLog[key] = { setor: t.department || 'Desconhecido', id_setor: t.departmentId || 'N/A', bot: 0, aguardando: 0 };
+        if (!deptSummary[key]) {
+          deptSummary[key] = { setor: t.department || 'Desconhecido', id_setor: t.departmentId || 'N/A', bot: 0, aguardando: 0 };
         }
-        if (t.status === 'bot') deptLog[key].bot++;
-        if (t.status === 'waiting') deptLog[key].aguardando++;
+        if (t.status === 'bot') deptSummary[key].bot++;
+        if (t.status === 'waiting') deptSummary[key].aguardando++;
+
+        detailedLogs.push({
+            protocolo: t.protocol,
+            cliente: t.clientName,
+            status: t.status === 'bot' ? 'EM BOT' : 'AGUARDANDO',
+            id_setor: t.departmentId,
+            setor: t.department
+        });
       }
     });
 
@@ -69,7 +80,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
     const ranking = Object.entries(rankingMap)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 10); // Aumentado para 10 no ranking já que tem mais espaço
+      .slice(0, 10);
 
     const topTechnician = ranking.length > 0 ? ranking[0] : null;
 
@@ -82,26 +93,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
 
     return {
       waiting, bot, inService,
-      onlineCount: attendants.length,
       avgWait: Math.round(avgWait),
       avgService: Math.round(avgService),
       finishedToday: finishedToday.length,
       finishedMonth: finishedMonth.length,
       ranking,
       topTechnician,
-      departmentLog: Object.values(deptLog)
+      departmentSummary: Object.values(deptSummary),
+      detailedLogs: detailedLogs.sort((a, b) => a.id_setor.localeCompare(b.id_setor))
     };
   }, [tickets, attendants]);
 
-  // Efeito para imprimir o Log no F12
+  // Efeito para imprimir o Log detalhado no F12
   useEffect(() => {
-    if (stats.departmentLog.length > 0) {
-      console.group("📊 DIAGNÓSTICO DE SETORES (IDs e Status)");
-      console.log("Use esta tabela para identificar quais setores precisam de ajuste de filtro.");
-      console.table(stats.departmentLog);
+    if (stats.detailedLogs.length > 0) {
+      console.clear();
+      console.group("📊 DIAGNÓSTICO DE TRIAGEM (F12)");
+      console.log("--- RESUMO POR SETOR ---");
+      console.table(stats.departmentSummary);
+      console.log("--- CRUZAMENTO DETALHADO (Chamado x ID Setor) ---");
+      console.table(stats.detailedLogs);
+      console.log("DICA: Use os IDs de setor acima para ajustar os filtros de triagem se necessário.");
       console.groupEnd();
     }
-  }, [stats.departmentLog]);
+  }, [stats.detailedLogs, stats.departmentSummary]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
@@ -162,7 +177,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
         />
       </div>
 
-      {/* Gráfico de Ranking - Ocupa agora toda a largura disponível */}
+      {/* Gráfico de Ranking */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-bold text-white flex items-center gap-2">
@@ -171,7 +186,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants }) => 
           </h3>
           <div className="text-[10px] text-slate-500 uppercase flex items-center gap-2">
             <ListFilter className="w-3 h-3" />
-            Logs de ID disponíveis no Console (F12)
+            Logs de ID detalhados no Console (F12)
           </div>
         </div>
         
