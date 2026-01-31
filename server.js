@@ -51,35 +51,34 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-async function opaRequest(baseUrl, path, token, params = {}) {
+/**
+ * Realiza requisições para o Opa Suite seguindo a documentação:
+ * GET com Body contendo { filter, options }
+ */
+async function opaRequest(baseUrl, path, token, body = {}) {
   return new Promise((resolve) => {
     try {
       let finalUrlStr = baseUrl.replace(/\/$/, '');
       if (!finalUrlStr.endsWith(path)) finalUrlStr += path;
       
       const url = new URL(finalUrlStr);
-      
-      const loopbackFilter = {
-        where: params.filter || {},
-        limit: params.options?.limit || 100,
-        order: "_id DESC",
-        include: params.options?.populate || []
-      };
-
-      url.searchParams.append('filter', JSON.stringify(loopbackFilter));
-
       const lib = url.protocol === 'https:' ? https : http;
+      
+      const jsonBody = JSON.stringify(body);
+
       const options = {
-        method: 'GET',
+        method: 'GET', // A documentação do Opa Suite usa GET com body
         headers: { 
           'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(jsonBody)
         },
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: url.pathname + url.search,
+        path: url.pathname,
         rejectUnauthorized: false,
-        timeout: 10000
+        timeout: 15000
       };
 
       const req = lib.request(options, (res) => {
@@ -88,16 +87,35 @@ async function opaRequest(baseUrl, path, token, params = {}) {
         res.on('end', () => {
           try { 
             const parsed = JSON.parse(data);
-            if (res.statusCode >= 400) resolve({ ok: false, error: parsed, status: res.statusCode });
-            else resolve({ ok: true, data: parsed }); 
+            if (res.statusCode >= 400) {
+                console.error(`[OpaAPI Error ${res.statusCode}]`, data.substring(0, 200));
+                resolve({ ok: false, error: parsed, status: res.statusCode });
+            } else {
+                resolve({ ok: true, data: parsed }); 
+            }
           }
-          catch (e) { resolve({ ok: false, error: 'JSON Parse Error', raw: data }); }
+          catch (e) { 
+            console.error(`[OpaAPI Parse Error]`, data.substring(0, 100));
+            resolve({ ok: false, error: 'JSON Parse Error', raw: data }); 
+          }
         });
       });
-      req.on('error', (e) => resolve({ ok: false, error: e.message }));
-      req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Timeout' }); });
+
+      req.on('error', (e) => {
+        console.error(`[OpaAPI Conn Error]`, e.message);
+        resolve({ ok: false, error: e.message });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ ok: false, error: 'Timeout' });
+      });
+
+      req.write(jsonBody); // Envia o filtro no corpo da requisição GET
       req.end();
-    } catch (e) { resolve({ ok: false, error: e.message }); }
+    } catch (e) { 
+      resolve({ ok: false, error: e.message }); 
+    }
   });
 }
 
@@ -139,43 +157,50 @@ app.get('/api/dashboard-data', async (req, res) => {
     
     let baseUrl = config.api_url.trim().replace(/\/$/, '');
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
-    
     const token = config.api_token;
-    const populate = ["id_cliente", "id_atendente", "id_motivo_atendimento", "setor", "id_contato"];
 
-    // 1. Tenta buscar ativos com filtro
-    let activeRes = await opaRequest(baseUrl, '/atendimento', token, {
-      filter: { status: { "neq": "F" } },
-      options: { limit: 200, populate }
-    });
+    // Data de 7 dias atrás para o filtro dataInicialAbertura
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const dateFilter = sevenDaysAgo.toISOString().split('T')[0];
 
-    // 2. Se falhar ou vier vazio, tenta buscar TUDO sem filtro (Fallback)
-    if (!activeRes.ok || (activeRes.data?.data?.length === 0 && !Array.isArray(activeRes.data))) {
-       console.log("[Proxy] Fallback: Tentando busca sem filtros...");
-       activeRes = await opaRequest(baseUrl, '/atendimento', token, {
-         options: { limit: 100, populate }
-       });
-    }
+    console.log(`[Proxy] Solicitando atendimentos desde: ${dateFilter}`);
 
-    const [uRes, historyRes] = await Promise.all([
-      opaRequest(baseUrl, '/usuario', token, { filter: { status: "A" }, options: { limit: 100 } }),
-      opaRequest(baseUrl, '/atendimento', token, { filter: { status: "F" }, options: { limit: 100, populate } })
-    ]);
-
-    const getList = (res) => res.ok ? (res.data?.data || (Array.isArray(res.data) ? res.data : [])) : [];
-
-    res.json({
-      success: true,
-      tickets: [...getList(activeRes), ...getList(historyRes)],
-      attendants: getList(uRes),
-      debug_info: {
-        active_ok: activeRes.ok,
-        active_count: getList(activeRes).length,
-        history_count: getList(historyRes).length
+    // Requisição unificada para trazer os últimos atendimentos e filtrar localmente
+    // Isso evita problemas caso o filtro de status no servidor esteja com erro
+    const ticketRes = await opaRequest(baseUrl, '/atendimento', token, {
+      filter: {
+        dataInicialAbertura: dateFilter
+      },
+      options: {
+        limit: 500
       }
     });
 
+    const userRes = await opaRequest(baseUrl, '/usuario', token, {
+      options: { limit: 200 }
+    });
+
+    const getList = (res) => {
+      if (res.ok && res.data?.status === "success") {
+        return res.data.data || [];
+      }
+      return Array.isArray(res.data) ? res.data : [];
+    };
+
+    const allTickets = getList(ticketRes);
+    const attendants = getList(userRes);
+
+    console.log(`[Proxy] Finalizado. Tickets: ${allTickets.length}, Atendentes: ${attendants.length}`);
+
+    res.json({
+      success: true,
+      tickets: allTickets,
+      attendants: attendants
+    });
+
   } catch (error) { 
+    console.error("[Proxy Error]", error.message);
     res.status(500).json({ success: false, error: error.message }); 
   }
 });

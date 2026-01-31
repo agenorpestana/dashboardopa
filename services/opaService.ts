@@ -22,7 +22,9 @@ function determineTicketStatus(t: any): TicketStatus {
   if (s === 'EA' || s === 'E') return 'in_service';
   if (s === 'AG' || s === 'A') return 'waiting';
   if (s === 'PS' || s === 'BOT' || s === 'B' || s === 'T') return 'bot';
-  if (t.id_atendente) return 'in_service';
+  
+  // Se tem atendente mas o status não é 'F', provavelmente está em atendimento
+  if (t.id_atendente && s !== 'F') return 'in_service';
   return 'bot'; 
 }
 
@@ -44,11 +46,8 @@ export const opaService = {
       const rawAttendants = result.attendants || [];
 
       console.group("DIAGNÓSTICO OPA SUITE");
-      console.log("Total Raw Tickets:", rawTickets.length);
-      console.log("Total Raw Attendants:", rawAttendants.length);
-      if (rawTickets.length > 0) {
-          console.log("Exemplo de Ticket:", rawTickets[0]);
-      }
+      console.log("Total Tickets Recebidos:", rawTickets.length);
+      if (rawTickets.length > 0) console.log("Primeiro Ticket:", rawTickets[0]);
       console.groupEnd();
 
       const ROBOT_NAMES = ["VICTOR", "ROBÔ", "BOT", "TRIAGEM", "AUTO"];
@@ -72,25 +71,30 @@ export const opaService = {
         const rawAttName = typeof attObj === 'object' ? String(attObj?.nome || '') : '';
         
         const isRobot = ROBOT_NAMES.some(rn => (rawAttName || '').toUpperCase().includes(rn));
-        if (!isRobot && attId) attName = rawAttName || attendantMap.get(attId);
+        if (!isRobot && attId) {
+            attName = rawAttName || attendantMap.get(attId) || 'Atendente';
+        }
 
-        let clientName = t.cliente_nome || t.id_cliente?.nome || t.id_contato?.nome || 'Cliente Anonimo';
+        // Nome do cliente conforme doc: t.id_cliente.nome ou t.cliente_nome
+        let clientName = t.cliente_nome || (typeof t.id_cliente === 'object' ? t.id_cliente?.nome : undefined) || 'Cliente';
+        if (clientName === 'Cliente' && t.protocolo) clientName = `Prot: ${t.protocolo}`;
 
         return {
           id: String(t._id || t.id),
           protocol: String(t.protocolo || 'N/A'),
           clientName: String(clientName),
-          contact: t.cliente_fone || '',
+          contact: t.cliente_fone || t.canal_cliente || '',
           waitTimeSeconds: status === 'waiting' ? calculateDuration(t.date) : 0,
           durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
           attendantName: attName,
-          department: t.id_motivo_atendimento?.motivo || t.setor?.nome || 'Geral',
+          department: (typeof t.id_motivo_atendimento === 'object' ? t.id_motivo_atendimento?.motivo : undefined) || 'Geral',
           createdAt: t.date,
           closedAt: t.fim
         };
       });
 
+      // Atualiza contagem de chats
       tickets.forEach(t => {
         if (t.status === 'in_service' && t.attendantName) {
           const a = attendants.find(att => att.name === t.attendantName);
@@ -100,7 +104,7 @@ export const opaService = {
 
       return { tickets, attendants };
     } catch (e) {
-      console.error("[OpaService] Fatal Error:", e);
+      console.error("[OpaService] Error:", e);
       return { tickets: [], attendants: [] };
     }
   }
