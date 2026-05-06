@@ -15,6 +15,7 @@ export interface Ticket {
   durationSeconds?: number; // Time in service
   status: TicketStatus;
   attendantName?: string;
+  attendantId?: string;
   department?: string;
   departmentId?: string; // ID interno do Opa Suite para diagnósticos
   createdAt?: string;

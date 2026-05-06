@@ -36,10 +36,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
     const finished = tickets.filter(t => t.status === 'finished');
 
     const isBotFinished = (t: Ticket) => {
-      if (!t.attendantName) return true;
-      const lowerName = t.attendantName.toLowerCase();
-      if (lowerName.includes('bot') || lowerName.includes('robô') || lowerName.includes('robo')) return true;
-      return false;
+      return t.attendantId === '5d1642ad4b16a50312cc8f4d';
     };
 
     const finishedToday = finished.filter(t => {
