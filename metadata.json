@@ -1,5 +1,6 @@
 {
   "name": "Opa Suite Dashboard",
   "description": "A professional service dashboard for Opa Suite, featuring real-time status monitoring, waiting lists, and attendant tracking with an admin configuration panel.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }
