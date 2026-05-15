@@ -35,17 +35,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
     const inService = tickets.filter(t => t.status === 'in_service');
     const finished = tickets.filter(t => t.status === 'finished');
 
-    const isBotFinished = (t: Ticket) => {
-      return t.attendantId === '5d1642ad4b16a50312cc8f4d';
-    };
-
     const finishedToday = finished.filter(t => {
       const dateStr = t.closedAt || t.createdAt;
       return dateStr && String(dateStr).startsWith(todayStr.substring(0, 10));
     });
-
-    const finishedTodayHuman = finishedToday.filter(t => !isBotFinished(t));
-    const finishedTodayBot = finishedToday.filter(t => isBotFinished(t));
 
     const finishedMonth = finished.filter(t => {
       const dateStr = t.closedAt || t.createdAt;
@@ -53,9 +46,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       const d = new Date(String(dateStr).replace(' ', 'T'));
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
-
-    const finishedMonthHuman = finishedMonth.filter(t => !isBotFinished(t));
-    const finishedMonthBot = finishedMonth.filter(t => isBotFinished(t));
 
     const deptSummary: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
     const detailedLogs: any[] = [];
@@ -81,7 +71,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
 
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
-       if (t.attendantName && !isBotFinished(t)) {
+       if (t.attendantName) {
          rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
        }
     });
@@ -104,10 +94,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       waiting, bot, inService, finished,
       avgWait: Math.round(avgWait),
       avgService: Math.round(avgService),
-      finishedTodayHuman: finishedTodayHuman.length,
-      finishedTodayBot: finishedTodayBot.length,
-      finishedMonthHuman: finishedMonthHuman.length,
-      finishedMonthBot: finishedMonthBot.length,
+      finishedToday: finishedToday.length,
+      finishedMonth: finishedMonth.length,
       ranking,
       topTechnician,
       departmentSummary: Object.values(deptSummary),
@@ -172,13 +160,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
             <p className="text-slate-400 text-sm">Dados reais filtrados (Sem Robôs)</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 w-full xl:w-auto">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Espera Média</p>
             <div className="flex items-center gap-2">
               <Timer className="w-4 h-4 text-amber-500" />
               <p className="text-lg font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p>
-             </div>
+            </div>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
             <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Conversa Média</p>
@@ -188,31 +176,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
             </div>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 text-center leading-tight">Hoje<br/>(Humano)</p>
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Hoje</p>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedTodayHuman}</p>
+              <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
             </div>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 text-center leading-tight">Hoje<br/>(Bot)</p>
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-slate-400" />
-              <p className="text-lg font-mono font-bold text-slate-300">{stats.finishedTodayBot}</p>
-            </div>
-          </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 text-center leading-tight">Mês<br/>(Humano)</p>
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Mês Atual</p>
             <div className="flex items-center gap-2">
               <CalendarCheck className="w-4 h-4 text-violet-400" />
-              <p className="text-lg font-mono font-bold text-violet-400">{stats.finishedMonthHuman}</p>
-            </div>
-          </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 text-center leading-tight">Mês<br/>(Bot)</p>
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-slate-400" />
-              <p className="text-lg font-mono font-bold text-slate-300">{stats.finishedMonthBot}</p>
+              <p className="text-lg font-mono font-bold text-violet-400">{stats.finishedMonth}</p>
             </div>
           </div>
         </div>

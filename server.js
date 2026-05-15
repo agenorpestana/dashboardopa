@@ -16,8 +16,11 @@ const __dirname = dirname(__filename);
 dotenv.config();
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+const app = express();
+const port = process.env.PORT || 3000;
+
 const dbConfig = {
-  host: process.env.DB_HOST || '127.0.0.1',
+  host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'opadashboard',
@@ -42,8 +45,13 @@ async function initDB() {
     connection.release();
   } catch (error) { console.error("Erro ao inicializar banco:", error.message); }
 }
+initDB();
 
-async function opaRequest(baseUrl, path, token, body = null) {
+app.use(cors());
+app.use(express.json());
+app.use(express.static(join(__dirname, 'dist')));
+
+async function opaRequest(baseUrl, path, token, body = {}) {
   return new Promise((resolve) => {
     try {
       let finalUrlStr = baseUrl.replace(/\/$/, '');
@@ -52,22 +60,16 @@ async function opaRequest(baseUrl, path, token, body = null) {
       const url = new URL(finalUrlStr);
       const lib = url.protocol === 'https:' ? https : http;
       
-      const hasBody = body !== null && Object.keys(body).length > 0;
-      const jsonBody = hasBody ? JSON.stringify(body) : '';
-
-      const headers = { 
-        'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      };
-
-      if (hasBody) {
-        headers['Content-Length'] = Buffer.byteLength(jsonBody);
-      }
+      const jsonBody = JSON.stringify(body);
 
       const options = {
         method: 'GET',
-        headers,
+        headers: { 
+          'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(jsonBody)
+        },
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
@@ -99,9 +101,7 @@ async function opaRequest(baseUrl, path, token, body = null) {
         resolve({ ok: false, error: 'Timeout' });
       });
 
-      if (hasBody) {
-        req.write(jsonBody);
-      }
+      req.write(jsonBody);
       req.end();
     } catch (e) { 
       resolve({ ok: false, error: e.message }); 
@@ -109,6 +109,9 @@ async function opaRequest(baseUrl, path, token, body = null) {
   });
 }
 
+/**
+ * Função para buscar dados com paginação automática
+ */
 async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords = 10000) {
   let allData = [];
   let skip = 0;
@@ -149,212 +152,133 @@ async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords =
   return allData;
 }
 
-async function startServer() {
-  await initDB();
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+    const user = rows[0];
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
+    res.json({ success: true, username: user.username });
+  } catch (error) { res.status(500).json({ success: false }); }
+});
 
-  const app = express();
-  const port = process.env.PORT || 3000;
+app.get('/api/settings', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    res.json(rows[0] || {});
+  } catch (error) { res.status(500).json({ error: 'Erro ao buscar configurações' }); }
+});
 
-  app.use(cors());
-  app.use(express.json());
+app.post('/api/settings', async (req, res) => {
+  const { username, password, api_url, api_token } = req.body;
+  try {
+    const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+    const user = userRows[0];
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(403).json({ success: false });
+    const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
+    if (settingRows.length > 0) await pool.query('UPDATE settings SET api_url = ?, api_token = ? WHERE id = ?', [api_url, api_token, settingRows[0].id]);
+    else await pool.query('INSERT INTO settings (api_url, api_token) VALUES (?, ?)', [api_url, api_token]);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false }); }
+});
 
-  // ... api routes ...
-  
-  // API requests definitions
-  app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-      const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-      const user = rows[0];
-      if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
-      res.json({ success: true, username: user.username });
-    } catch (error) { res.status(500).json({ success: false }); }
-  });
+app.get('/api/dashboard-data', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
+    
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+    const token = config.api_token;
 
-  app.get('/api/settings', async (req, res) => {
-    try {
-      const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-      res.json(rows[0] || {});
-    } catch (error) { res.status(500).json({ error: 'Erro ao buscar configurações' }); }
-  });
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const dateFilter = `${year}-${month}-01 00:00:00`;
+    
+    const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
 
-  app.post('/api/settings', async (req, res) => {
-    const { username, password, api_url, api_token } = req.body;
-    try {
-      const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-      const user = userRows[0];
-      if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(403).json({ success: false });
-      const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
-      if (settingRows.length > 0) await pool.query('UPDATE settings SET api_url = ?, api_token = ? WHERE id = ?', [api_url, api_token, settingRows[0].id]);
-      else await pool.query('INSERT INTO settings (api_url, api_token) VALUES (?, ?)', [api_url, api_token]);
-      res.json({ success: true });
-    } catch (error) { res.status(500).json({ success: false }); }
-  });
-
-  app.get('/api/dashboard-data', async (req, res) => {
-    try {
-      const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-      const config = rows[0];
-      if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
-      
-      let baseUrl = config.api_url.trim().replace(/\/$/, '');
-      if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
-      const token = config.api_token;
-
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const dateFilter = `${year}-${month}-01 00:00:00`;
-      
-      const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';
-
-      // 1. ATIVOS (Normalmente não passam de 1000, busca simples)
-      const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
-        filter: { status: { $ne: 'F' } },
-        options: { limit: 1000, sort: { date: -1 } }
-      });
-
-      // 2. FINALIZADOS (PAGINADOS para buscar todo o mês)
-      const finishedTicketsRaw = await fetchAllWithPagination(
-        baseUrl, 
-        '/atendimento', 
-        token, 
-        {
-          status: 'F',
-          date: { $gte: dateFilter }, 
-          id_atendente: { $ne: ROBOT_ID }
-        },
-        15000 // Limite de segurança para não exceder memória
-      );
-
-      // 3. USUÁRIOS
-      const userRes = await opaRequest(baseUrl, '/usuario', token, {
-        options: { limit: 500 }
-      });
-
-      // 4. DEPARTAMENTOS
-      const deptRes = await opaRequest(baseUrl, '/departamento', token, {
-          options: { limit: 500 }
-      });
-
-      // 5. PERÍODOS
-      const periodRes = await opaRequest(baseUrl, '/atendimento/periodo', token, {
-          options: { limit: 100 }
-      });
-
-      const getList = (res) => {
-        if (res && res.ok && res.data?.status === "success") return res.data.data || [];
-        if (res && res.ok && Array.isArray(res.data)) return res.data;
-        return [];
-      };
-
-      const isRobot = (t) => {
-        const attId = typeof t.id_atendente === 'object' ? String(t.id_atendente?._id || '') : String(t.id_atendente || '');
-        const attName = typeof t.id_atendente === 'object' ? String(t.id_atendente?.nome || '') : '';
-        return attId === ROBOT_ID || attName.toLowerCase().includes('robô') || attName.toLowerCase().includes('robot');
-      };
-
-      const sortByDateDesc = (a, b) => {
-          const dateA = new Date(String(a.date || '').replace(' ', 'T')).getTime();
-          const dateB = new Date(String(b.date || '').replace(' ', 'T')).getTime();
-          return dateB - dateA;
-      };
-
-      const rawActive = getList(activeRes).sort(sortByDateDesc);
-      const rawFinished = finishedTicketsRaw.sort(sortByDateDesc);
-      
-      const departments = getList(deptRes);
-      const periods = getList(periodRes);
-
-      const activeTickets = rawActive.filter(t => !isRobot(t));
-      const finishedTickets = rawFinished.filter(t => !isRobot(t));
-      
-      const attendants = getList(userRes).filter(a => {
-          const id = String(a._id || a.id);
-          const nome = String(a.nome || '');
-          return id !== ROBOT_ID && !nome.toLowerCase().includes('robô');
-      });
-
-      res.json({
-        success: true,
-        pagination: { totalFetched: finishedTickets.length },
-        tickets: [...activeTickets, ...finishedTickets],
-        attendants: attendants,
-        departments: departments,
-        periods: periods
-      });
-
-    } catch (error) { 
-      res.status(500).json({ success: false, error: error.message }); 
-    }
-  });
-
-  app.get('/api/ticket/:id', async (req, res) => {
-    try {
-      const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-      const config = rows[0];
-      if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
-      
-      let baseUrl = config.api_url.trim().replace(/\/$/, '');
-      if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
-      const token = config.api_token;
-
-      const ticketId = req.params.id;
-      // For single GET, we don't send a body to be safe, or just send {} if opaRequest supports it.
-      const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
-      if (!result.ok) {
-         return res.status(result.status || 500).json(result);
-      }
-      
-      res.json({ success: true, data: result.data?.data || result.data });
-
-    } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  app.get('/api/ticket/:id/messages', async (req, res) => {
-    try {
-      const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-      const config = rows[0];
-      if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
-      
-      let baseUrl = config.api_url.trim().replace(/\/$/, '');
-      if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
-      const token = config.api_token;
-
-      const ticketId = req.params.id;
-      // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
-      const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
-        filter: { id_rota: ticketId },
-        options: { limit: 100 }
-      });
-      
-      if (!result.ok) {
-         return res.status(result.status || 500).json(result);
-      }
-      
-      res.json({ success: true, data: result.data?.data || result.data });
-
-    } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  // Vite + Frontend setup
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+    // 1. ATIVOS (Normalmente não passam de 1000, busca simples)
+    const activeRes = await opaRequest(baseUrl, '/atendimento', token, {
+      filter: { status: { $ne: 'F' } },
+      options: { limit: 1000, sort: { date: -1 } }
     });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(join(__dirname, 'dist')));
-    app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
+
+    // 2. FINALIZADOS (PAGINADOS para buscar todo o mês)
+    const finishedTicketsRaw = await fetchAllWithPagination(
+      baseUrl, 
+      '/atendimento', 
+      token, 
+      {
+        status: 'F',
+        date: { $gte: dateFilter }, 
+        id_atendente: { $ne: ROBOT_ID }
+      },
+      15000 // Limite de segurança para não exceder memória
+    );
+
+    // 3. USUÁRIOS
+    const userRes = await opaRequest(baseUrl, '/usuario', token, {
+      options: { limit: 500 }
+    });
+
+    // 4. DEPARTAMENTOS
+    const deptRes = await opaRequest(baseUrl, '/departamento', token, {
+        options: { limit: 500 }
+    });
+
+    // 5. PERÍODOS
+    const periodRes = await opaRequest(baseUrl, '/atendimento/periodo', token, {
+        options: { limit: 100 }
+    });
+
+    const getList = (res) => {
+      if (res && res.ok && res.data?.status === "success") return res.data.data || [];
+      if (res && res.ok && Array.isArray(res.data)) return res.data;
+      return [];
+    };
+
+    const isRobot = (t) => {
+      const attId = typeof t.id_atendente === 'object' ? String(t.id_atendente?._id || '') : String(t.id_atendente || '');
+      const attName = typeof t.id_atendente === 'object' ? String(t.id_atendente?.nome || '') : '';
+      return attId === ROBOT_ID || attName.toLowerCase().includes('robô') || attName.toLowerCase().includes('robot');
+    };
+
+    const sortByDateDesc = (a, b) => {
+        const dateA = new Date(String(a.date || '').replace(' ', 'T')).getTime();
+        const dateB = new Date(String(b.date || '').replace(' ', 'T')).getTime();
+        return dateB - dateA;
+    };
+
+    const rawActive = getList(activeRes).sort(sortByDateDesc);
+    const rawFinished = finishedTicketsRaw.sort(sortByDateDesc);
+    
+    const departments = getList(deptRes);
+    const periods = getList(periodRes);
+
+    const activeTickets = rawActive.filter(t => !isRobot(t));
+    const finishedTickets = rawFinished.filter(t => !isRobot(t));
+    
+    const attendants = getList(userRes).filter(a => {
+        const id = String(a._id || a.id);
+        const nome = String(a.nome || '');
+        return id !== ROBOT_ID && !nome.toLowerCase().includes('robô');
+    });
+
+    res.json({
+      success: true,
+      pagination: { totalFetched: finishedTickets.length },
+      tickets: [...activeTickets, ...finishedTickets],
+      attendants: attendants,
+      departments: departments,
+      periods: periods
+    });
+
+  } catch (error) { 
+    res.status(500).json({ success: false, error: error.message }); 
   }
+});
 
-  app.listen(port, "0.0.0.0", () => console.log(`Backend rodando na porta ${port}`));
-}
-
-startServer();
+app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
+app.listen(port, () => console.log(`Backend rodando na porta ${port}`));
