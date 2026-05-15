@@ -51,7 +51,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-async function opaRequest(baseUrl, path, token, body = {}) {
+async function opaRequest(baseUrl, path, token, body = null) {
   return new Promise((resolve) => {
     try {
       let finalUrlStr = baseUrl.replace(/\/$/, '');
@@ -60,16 +60,22 @@ async function opaRequest(baseUrl, path, token, body = {}) {
       const url = new URL(finalUrlStr);
       const lib = url.protocol === 'https:' ? https : http;
       
-      const jsonBody = JSON.stringify(body);
+      const hasBody = body !== null && Object.keys(body).length > 0;
+      const jsonBody = hasBody ? JSON.stringify(body) : '';
+
+      const headers = { 
+        'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      };
+
+      if (hasBody) {
+        headers['Content-Length'] = Buffer.byteLength(jsonBody);
+      }
 
       const options = {
         method: 'GET',
-        headers: { 
-          'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(jsonBody)
-        },
+        headers,
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
@@ -101,7 +107,9 @@ async function opaRequest(baseUrl, path, token, body = {}) {
         resolve({ ok: false, error: 'Timeout' });
       });
 
-      req.write(jsonBody);
+      if (hasBody) {
+        req.write(jsonBody);
+      }
       req.end();
     } catch (e) { 
       resolve({ ok: false, error: e.message }); 

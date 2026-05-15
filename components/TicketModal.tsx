@@ -11,10 +11,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
   const [ticketData, setTicketData] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTicketData = async () => {
       setLoading(true);
+      setErrorMsg(null);
       try {
         const [ticketRes, messagesRes] = await Promise.all([
           fetch(`/api/ticket/${ticketId}`),
@@ -26,12 +28,15 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
         
         if (ticketJson.success) {
           setTicketData(ticketJson.data);
+        } else {
+          setErrorMsg(ticketJson.error ? JSON.stringify(ticketJson.error) : 'Erro ao buscar detalhes do protocolo.');
         }
         if (messagesJson.success) {
           setMessages(messagesJson.data || []);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error fetching ticket data", err);
+        setErrorMsg(err.message || 'Erro de conexão.');
       } finally {
         setLoading(false);
       }
@@ -168,8 +173,9 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
               </div>
             </>
           ) : (
-             <div className="text-center py-10 text-slate-500 w-full">
-               <p>Não foi possível carregar os dados.</p>
+             <div className="text-center py-10 text-slate-500 w-full flex flex-col items-center justify-center">
+               <p className="text-rose-400 font-bold mb-2">Não foi possível carregar os dados.</p>
+               {errorMsg && <p className="text-xs text-slate-400 font-mono bg-slate-950 border border-slate-800 p-2 rounded max-w-md break-words">{errorMsg}</p>}
              </div>
           )}
         </div>
