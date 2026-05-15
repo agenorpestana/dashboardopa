@@ -51,7 +51,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
-async function opaRequest(baseUrl, path, token, body = null) {
+async function opaRequest(baseUrl, path, token, body = {}) {
   return new Promise((resolve) => {
     try {
       let finalUrlStr = baseUrl.replace(/\/$/, '');
@@ -60,22 +60,16 @@ async function opaRequest(baseUrl, path, token, body = null) {
       const url = new URL(finalUrlStr);
       const lib = url.protocol === 'https:' ? https : http;
       
-      const hasBody = body !== null && Object.keys(body).length > 0;
-      const jsonBody = hasBody ? JSON.stringify(body) : '';
-
-      const headers = { 
-        'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      };
-
-      if (hasBody) {
-        headers['Content-Length'] = Buffer.byteLength(jsonBody);
-      }
+      const jsonBody = JSON.stringify(body);
 
       const options = {
         method: 'GET',
-        headers,
+        headers: { 
+          'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(jsonBody)
+        },
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
@@ -107,9 +101,7 @@ async function opaRequest(baseUrl, path, token, body = null) {
         resolve({ ok: false, error: 'Timeout' });
       });
 
-      if (hasBody) {
-        req.write(jsonBody);
-      }
+      req.write(jsonBody);
       req.end();
     } catch (e) { 
       resolve({ ok: false, error: e.message }); 
@@ -301,34 +293,6 @@ app.get('/api/ticket/:id', async (req, res) => {
     const ticketId = req.params.id;
     // For single GET, we don't send a body to be safe, or just send {} if opaRequest supports it.
     const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
-    if (!result.ok) {
-       return res.status(result.status || 500).json(result);
-    }
-    
-    res.json({ success: true, data: result.data?.data || result.data });
-
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/ticket/:id/messages', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    const config = rows[0];
-    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
-    
-    let baseUrl = config.api_url.trim().replace(/\/$/, '');
-    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
-    const token = config.api_token;
-
-    const ticketId = req.params.id;
-    // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
-    const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
-      filter: { id_rota: ticketId },
-      options: { limit: 100 }
-    });
-    
     if (!result.ok) {
        return res.status(result.status || 500).json(result);
     }
