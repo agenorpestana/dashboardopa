@@ -1,8 +1,9 @@
 
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { Ticket, Attendant, Department } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
+import { TicketModal } from './TicketModal';
 import { Clock, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, BarChart3, Star, ListFilter } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -22,6 +23,8 @@ const formatTime = (seconds: number) => {
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, departments, periods }) => {
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+
   const stats = useMemo(() => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -246,8 +249,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <TicketList title="Aguardando Setor" tickets={stats.waiting} type="waiting" />
         <TicketList title="Em Bot / Triagem" tickets={stats.bot} type="bot" />
-        <TicketList title="Conversas Ativas" tickets={stats.inService} type="in_service" />
+        <TicketList 
+          title="Conversas Ativas" 
+          tickets={stats.inService} 
+          type="in_service" 
+          onTicketClick={setSelectedTicket}
+        />
       </div>
+
+      {selectedTicket && (
+        <TicketModal 
+          ticket={selectedTicket} 
+          onClose={() => setSelectedTicket(null)} 
+        />
+      )}
     </div>
   );
 };

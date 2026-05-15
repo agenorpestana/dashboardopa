@@ -280,5 +280,53 @@ app.get('/api/dashboard-data', async (req, res) => {
   }
 });
 
+app.get('/api/ticket-details/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
+    
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+    const token = config.api_token;
+
+    const result = await opaRequest(baseUrl, `/atendimento/${id}`, token);
+    if (!result.ok) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+    
+    res.json({ success: true, data: result.data?.data || result.data || {} });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/ticket-messages/:routeId', async (req, res) => {
+  try {
+    const { routeId } = req.params;
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
+    
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+    const token = config.api_token;
+
+    const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
+      filter: { id_rota: routeId },
+      options: { limit: 1000 }
+    });
+
+    if (!result.ok) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+    
+    res.json({ success: true, data: result.data?.data || [] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
 app.listen(port, () => console.log(`Backend rodando na porta ${port}`));

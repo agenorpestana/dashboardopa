@@ -7,6 +7,7 @@ interface TicketListProps {
   title: string;
   tickets: Ticket[];
   type: 'waiting' | 'in_service' | 'bot';
+  onTicketClick?: (ticket: Ticket) => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -17,7 +18,7 @@ const formatTime = (seconds: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) => {
+export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type, onTicketClick }) => {
   let accent = 'border-slate-500';
   let badge = 'bg-slate-500/10 text-slate-500';
   let iconColor = 'text-slate-400';
@@ -63,7 +64,11 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
           </thead>
           <tbody className="divide-y divide-slate-700/30">
             {tickets.map((t) => (
-              <tr key={t.id} className="hover:bg-slate-700/20 group transition-colors">
+              <tr 
+                key={t.id} 
+                className={`hover:bg-slate-700/20 group transition-colors ${onTicketClick ? 'cursor-pointer' : ''}`}
+                onClick={() => onTicketClick?.(t)}
+              >
                 <td className="p-3">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400">
