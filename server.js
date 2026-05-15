@@ -280,5 +280,29 @@ app.get('/api/dashboard-data', async (req, res) => {
   }
 });
 
+app.get('/api/ticket/:id', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
+    
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+    const token = config.api_token;
+
+    const ticketId = req.params.id;
+    // For single GET, we don't send a body to be safe, or just send {} if opaRequest supports it.
+    const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
+    if (!result.ok) {
+       return res.status(result.status || 500).json(result);
+    }
+    
+    res.json({ success: true, data: result.data?.data || result.data });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
 app.listen(port, () => console.log(`Backend rodando na porta ${port}`));

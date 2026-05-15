@@ -1,7 +1,8 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Ticket } from '../types';
-import { Clock, User, Hash, Bot } from 'lucide-react';
+import { Clock, User, Hash, Bot, Eye } from 'lucide-react';
+import { TicketModal } from './TicketModal';
 
 interface TicketListProps {
   title: string;
@@ -18,6 +19,8 @@ const formatTime = (seconds: number) => {
 };
 
 export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) => {
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+
   let accent = 'border-slate-500';
   let badge = 'bg-slate-500/10 text-slate-500';
   let iconColor = 'text-slate-400';
@@ -43,58 +46,79 @@ export const TicketList: React.FC<TicketListProps> = ({ title, tickets, type }) 
   }
 
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col shadow-lg border-t-2">
-      <div className={`p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center border-l-4 ${accent}`}>
-        <h3 className="font-semibold text-xs text-white uppercase tracking-wider flex items-center gap-2">
-          <Icon className={`w-4 h-4 ${iconColor}`} /> 
-          {title}
-        </h3>
-        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badge}`}>{tickets.length}</span>
-      </div>
-      
-      <div className="overflow-y-auto h-[320px] custom-scrollbar bg-slate-900/20">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-900/50 text-slate-500 text-[10px] uppercase sticky top-0 z-10">
-              <th className="p-3 font-medium">Cliente</th> 
-              <th className="p-3 text-right font-medium">{type === 'in_service' ? 'Duração' : 'Espera'}</th>
-              <th className="p-3 text-right font-medium">Protocolo</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-700/30">
-            {tickets.map((t) => (
-              <tr key={t.id} className="hover:bg-slate-700/20 group transition-colors">
-                <td className="p-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400">
-                      {t.clientName.substring(0,2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-xs text-slate-200 truncate pr-1">{t.clientName}</p>
-                      <p className="text-[9px] text-slate-500 truncate">
-                        {type === 'in_service' ? (t.attendantName || 'Em atendimento') : (t.department || 'Sem Setor')}
-                      </p>
-                    </div>
-                  </div>
-                </td>
-                <td className="p-3 text-right font-mono text-xs text-slate-400">
-                  {formatTime(type === 'in_service' ? t.durationSeconds : t.waitTimeSeconds)}
-                </td>
-                <td className="p-3 text-right font-mono text-[10px] text-slate-600 group-hover:text-slate-400 transition-colors">
-                  {t.protocol}
-                </td>
+    <>
+      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col shadow-lg border-t-2 relative">
+        <div className={`p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center border-l-4 ${accent}`}>
+          <h3 className="font-semibold text-xs text-white uppercase tracking-wider flex items-center gap-2">
+            <Icon className={`w-4 h-4 ${iconColor}`} /> 
+            {title}
+          </h3>
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badge}`}>{tickets.length}</span>
+        </div>
+        
+        <div className="overflow-y-auto h-[320px] custom-scrollbar bg-slate-900/20">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-900/50 text-slate-500 text-[10px] uppercase sticky top-0 z-10">
+                <th className="p-3 font-medium">Cliente</th> 
+                <th className="p-3 text-right font-medium">{type === 'in_service' ? 'Duração' : 'Espera'}</th>
+                <th className="p-3 text-right font-medium">Protocolo</th>
+                {type === 'in_service' && <th className="p-3 text-center font-medium w-10"></th>}
               </tr>
-            ))}
-            {tickets.length === 0 && (
-              <tr>
-                <td colSpan={3} className="py-20 text-center text-slate-500 text-xs italic">
-                  Nenhum atendimento ativo nesta categoria
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-700/30">
+              {tickets.map((t) => (
+                <tr 
+                  key={t.id} 
+                  className={`hover:bg-slate-700/20 group transition-colors ${type === 'in_service' ? 'cursor-pointer hover:bg-slate-700/40' : ''}`}
+                  onClick={() => type === 'in_service' && setSelectedTicketId(t.id)}
+                >
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400">
+                        {t.clientName.substring(0,2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-xs text-slate-200 truncate pr-1">{t.clientName}</p>
+                        <p className="text-[9px] text-slate-500 truncate">
+                          {type === 'in_service' ? (t.attendantName || 'Em atendimento') : (t.department || 'Sem Setor')}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-3 text-right font-mono text-xs text-slate-400">
+                    {formatTime(type === 'in_service' ? t.durationSeconds : t.waitTimeSeconds)}
+                  </td>
+                  <td className="p-3 text-right font-mono text-[10px] text-slate-600 group-hover:text-slate-400 transition-colors">
+                    {t.protocol}
+                  </td>
+                  {type === 'in_service' && (
+                    <td className="p-3 text-center">
+                       <button className="text-slate-500 hover:text-sky-400 transition-colors p-1 rounded-md hover:bg-slate-800">
+                         <Eye className="w-4 h-4" />
+                       </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {tickets.length === 0 && (
+                <tr>
+                  <td colSpan={type === 'in_service' ? 4 : 3} className="py-20 text-center text-slate-500 text-xs italic">
+                    Nenhum atendimento ativo nesta categoria
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+
+      {selectedTicketId && (
+        <TicketModal 
+          ticketId={selectedTicketId} 
+          onClose={() => setSelectedTicketId(null)} 
+        />
+      )}
+    </>
   );
 };
