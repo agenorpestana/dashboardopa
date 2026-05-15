@@ -23,22 +23,8 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
           fetch(`/api/ticket/${ticketId}/messages`)
         ]);
         
-        let ticketJson = { success: false, error: 'Resposta inválida do servidor' };
-        let messagesJson = { success: false, data: [] };
-
-        if (ticketRes.ok && ticketRes.headers.get('content-type')?.includes('application/json')) {
-           ticketJson = await ticketRes.json();
-        } else {
-           const text = await ticketRes.text();
-           console.error('Ticket response error:', ticketRes.status, text.substring(0, 100));
-        }
-
-        if (messagesRes.ok && messagesRes.headers.get('content-type')?.includes('application/json')) {
-           messagesJson = await messagesRes.json();
-        } else {
-           const text = await messagesRes.text();
-           console.error('Messages response error:', messagesRes.status, text.substring(0, 100));
-        }
+        const ticketJson = await ticketRes.json();
+        const messagesJson = await messagesRes.json();
         
         if (ticketJson.success) {
           setTicketData(ticketJson.data);
