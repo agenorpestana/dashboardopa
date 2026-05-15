@@ -19,6 +19,7 @@ export interface Ticket {
   departmentId?: string; // ID interno do Opa Suite para diagnósticos
   createdAt?: string;
   closedAt?: string;
+  isBot?: boolean; // Flag to check if it was handled/finished by a robot
 }
 
 export interface Attendant {

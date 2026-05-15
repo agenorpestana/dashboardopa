@@ -4,7 +4,7 @@ import { Ticket, Attendant, Department } from '../types';
 import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
 import { TicketModal } from './TicketModal';
-import { Clock, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, BarChart3, Star, ListFilter } from 'lucide-react';
+import { Clock, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, BarChart3, Star, ListFilter, User } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
@@ -50,22 +50,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
+    const finishedMonthBot = finishedMonth.filter(t => t.isBot).length;
+    const finishedMonthHuman = finishedMonth.filter(t => !t.isBot).length;
+
     const deptSummary: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
     const detailedLogs: any[] = [];
 
     tickets.forEach(t => {
-      if (t.status === 'bot' || t.status === 'waiting') {
+      // Use determineTicketStatus rules
+      const tStatus = t.status;
+      if (tStatus === 'bot' || tStatus === 'waiting') {
         const key = t.departmentId || 'unassigned';
         if (!deptSummary[key]) {
           deptSummary[key] = { setor: t.department || 'Desconhecido', id_setor: t.departmentId || 'N/A', bot: 0, aguardando: 0 };
         }
-        if (t.status === 'bot') deptSummary[key].bot++;
-        if (t.status === 'waiting') deptSummary[key].aguardando++;
+        if (tStatus === 'bot') deptSummary[key].bot++;
+        if (tStatus === 'waiting') deptSummary[key].aguardando++;
 
         detailedLogs.push({
             protocolo: t.protocol,
             cliente: t.clientName,
-            status: t.status === 'bot' ? 'EM BOT' : 'AGUARDANDO',
+            status: tStatus === 'bot' ? 'EM BOT' : 'AGUARDANDO',
             id_setor: t.departmentId,
             setor: t.department
         });
@@ -74,7 +79,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
 
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
-       if (t.attendantName) {
+       if (t.attendantName && !t.isBot) {
          rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
        }
     });
@@ -86,7 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
 
     const topTechnician = ranking.length > 0 ? ranking[0] : null;
 
-    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0);
+    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0 && !t.isBot);
     const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
     const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
 
@@ -97,7 +102,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       waiting, bot, inService, finished,
       avgWait: Math.round(avgWait),
       avgService: Math.round(avgService),
+      finishedTodayBot,
+      finishedTodayHuman,
       finishedToday: finishedToday.length,
+      finishedMonthBot,
+      finishedMonthHuman,
       finishedMonth: finishedMonth.length,
       ranking,
       topTechnician,
@@ -153,43 +162,74 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 flex flex-col xl:flex-row items-center justify-between shadow-xl gap-5">
+      <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 shadow-xl space-y-5">
         <div className="flex items-center gap-4">
           <div className="bg-sky-500/10 p-3 rounded-lg">
             <Activity className="w-6 h-6 text-sky-400" />
           </div>
           <div>
             <h2 className="text-xl font-bold text-white tracking-tight">Painel de Atendimento</h2>
-            <p className="text-slate-400 text-sm">Dados reais filtrados (Sem Robôs)</p>
+            <p className="text-slate-400 text-sm">Dados reais filtrados</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full xl:w-auto">
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Espera Média</p>
-            <div className="flex items-center gap-2">
+
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 w-full">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Espera Méd.</p>
+            <div className="flex items-center gap-1.5">
               <Timer className="w-4 h-4 text-amber-500" />
-              <p className="text-lg font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p>
+              <p className="text-sm font-mono font-bold text-amber-400">{formatTime(stats.avgWait)}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Conversa Média</p>
-            <div className="flex items-center gap-2">
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Conv. Méd.</p>
+            <div className="flex items-center gap-1.5">
               <Headset className="w-4 h-4 text-sky-500" />
-              <p className="text-lg font-mono font-bold text-sky-400">{formatTime(stats.avgService)}</p>
+              <p className="text-sm font-mono font-bold text-sky-400">{formatTime(stats.avgService)}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Hoje</p>
-            <div className="flex items-center gap-2">
+
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Hoje Bot</p>
+            <div className="flex items-center gap-1.5">
+              <Bot className="w-4 h-4 text-violet-400" />
+              <p className="text-sm font-mono font-bold text-violet-400">{stats.finishedTodayBot}</p>
+            </div>
+          </div>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Hoje Humano</p>
+            <div className="flex items-center gap-1.5">
+              <User className="w-4 h-4 text-emerald-400" />
+              <p className="text-sm font-mono font-bold text-emerald-400">{stats.finishedTodayHuman}</p>
+            </div>
+          </div>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Hoje (Total)</p>
+            <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <p className="text-lg font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
+              <p className="text-sm font-mono font-bold text-emerald-400">{stats.finishedToday}</p>
             </div>
           </div>
-          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center min-w-[130px]">
-            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Mês Atual</p>
-            <div className="flex items-center gap-2">
-              <CalendarCheck className="w-4 h-4 text-violet-400" />
-              <p className="text-lg font-mono font-bold text-violet-400">{stats.finishedMonth}</p>
+
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Mês Bot</p>
+            <div className="flex items-center gap-1.5">
+              <Bot className="w-4 h-4 text-violet-400" />
+              <p className="text-sm font-mono font-bold text-violet-400">{stats.finishedMonthBot}</p>
+            </div>
+          </div>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Mês Humano</p>
+            <div className="flex items-center gap-1.5">
+              <User className="w-4 h-4 text-blue-400" />
+              <p className="text-sm font-mono font-bold text-blue-400">{stats.finishedMonthHuman}</p>
+            </div>
+          </div>
+          <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 flex flex-col items-center">
+            <p className="text-slate-500 text-[10px] uppercase font-bold mb-1 line-clamp-1">Mês (Total)</p>
+            <div className="flex items-center gap-1.5">
+              <CalendarCheck className="w-4 h-4 text-sky-500" />
+              <p className="text-sm font-mono font-bold text-sky-400">{stats.finishedMonth}</p>
             </div>
           </div>
         </div>

@@ -212,8 +212,7 @@ app.get('/api/dashboard-data', async (req, res) => {
       token, 
       {
         status: 'F',
-        date: { $gte: dateFilter }, 
-        id_atendente: { $ne: ROBOT_ID }
+        date: { $gte: dateFilter } 
       },
       15000 // Limite de segurança para não exceder memória
     );
@@ -254,12 +253,13 @@ app.get('/api/dashboard-data', async (req, res) => {
     const rawActive = getList(activeRes).sort(sortByDateDesc);
     const rawFinished = finishedTicketsRaw.sort(sortByDateDesc);
     
+    // Add isBot flag to every ticket so the frontend can check it
+    const enhancedActive = rawActive.map(t => ({ ...t, isBot: isRobot(t) }));
+    const enhancedFinished = rawFinished.map(t => ({ ...t, isBot: isRobot(t) }));
+    
     const departments = getList(deptRes);
     const periods = getList(periodRes);
 
-    const activeTickets = rawActive.filter(t => !isRobot(t));
-    const finishedTickets = rawFinished.filter(t => !isRobot(t));
-    
     const attendants = getList(userRes).filter(a => {
         const id = String(a._id || a.id);
         const nome = String(a.nome || '');
@@ -268,8 +268,8 @@ app.get('/api/dashboard-data', async (req, res) => {
 
     res.json({
       success: true,
-      pagination: { totalFetched: finishedTickets.length },
-      tickets: [...activeTickets, ...finishedTickets],
+      pagination: { totalFetched: enhancedFinished.length },
+      tickets: [...enhancedActive, ...enhancedFinished],
       attendants: attendants,
       departments: departments,
       periods: periods

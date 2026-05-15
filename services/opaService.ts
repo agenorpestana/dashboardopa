@@ -38,6 +38,7 @@ const WAITING_ROOM_SECTOR_IDS = [
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
   if (s === 'F') return 'finished';
+  if (t.isBot) return 'bot';
   if (s === 'EA' || s === 'E') return 'in_service';
   const deptObj = t.id_motivo_atendimento || t.id_setor;
   const deptId = typeof deptObj === 'object' ? String(deptObj?._id || '') : String(deptObj || '');
@@ -112,7 +113,8 @@ export const opaService = {
           department: deptName,
           departmentId: deptId,
           createdAt: t.date,
-          closedAt: t.fim
+          closedAt: t.fim,
+          isBot: t.isBot
         };
       });
 
