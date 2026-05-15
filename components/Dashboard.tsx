@@ -43,8 +43,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       return dateStr && String(dateStr).startsWith(todayStr.substring(0, 10));
     });
 
-    const finishedTodayBot = finishedToday.filter(t => t.isBot).length;
-    const finishedTodayHuman = finishedToday.filter(t => !t.isBot).length;
+    const checkIsBot = (t: Ticket) => t.isBot || t.attendantName === 'Víctor' || t.attendantName?.toLowerCase().includes('bot');
+
+    const finishedTodayBot = finishedToday.filter(checkIsBot).length;
+    const finishedTodayHuman = finishedToday.filter(t => !checkIsBot(t)).length;
 
     const finishedMonth = finished.filter(t => {
       const dateStr = t.closedAt || t.createdAt;
@@ -53,14 +55,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
 
-    const finishedMonthBot = finishedMonth.filter(t => t.isBot).length;
-    const finishedMonthHuman = finishedMonth.filter(t => !t.isBot).length;
+    const finishedMonthBot = finishedMonth.filter(checkIsBot).length;
+    const finishedMonthHuman = finishedMonth.filter(t => !checkIsBot(t)).length;
 
     const deptSummary: Record<string, { setor: string, id_setor: string, bot: number, aguardando: number }> = {};
     const detailedLogs: any[] = [];
 
     tickets.forEach(t => {
-      // Use determineTicketStatus rules
       const tStatus = t.status;
       if (tStatus === 'bot' || tStatus === 'waiting') {
         const key = t.departmentId || 'unassigned';
@@ -82,7 +83,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
 
     const rankingMap: Record<string, number> = {};
     finishedMonth.forEach(t => {
-       if (t.attendantName && !t.isBot) {
+       if (t.attendantName && !checkIsBot(t)) {
          rankingMap[t.attendantName] = (rankingMap[t.attendantName] || 0) + 1;
        }
     });
@@ -94,7 +95,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
 
     const topTechnician = ranking.length > 0 ? ranking[0] : null;
 
-    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0 && !t.isBot);
+    const validFinished = finished.filter(t => (t.durationSeconds || 0) > 0 && !checkIsBot(t));
     const totalTMA = validFinished.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0);
     const avgService = validFinished.length > 0 ? totalTMA / validFinished.length : 0;
 
