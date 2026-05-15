@@ -326,8 +326,8 @@ async function startServer() {
       const ticketId = req.params.id;
       // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
       const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
-        filter: { id_rota: ticketId },
-        options: { limit: 100 }
+        filter: { id_rota: { $in: [ticketId, { _id: ticketId }] } },
+        options: { limit: 200, sort: { date: 1 } }
       });
       
       if (!result.ok) {
@@ -339,6 +339,11 @@ async function startServer() {
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
+  });
+
+  // Catch all unhandled API routes
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ success: false, error: 'Endpoint API não encontrado: ' + req.originalUrl });
   });
 
   // Vite + Frontend setup
