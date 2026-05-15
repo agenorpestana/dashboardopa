@@ -43,6 +43,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
       return dateStr && String(dateStr).startsWith(todayStr.substring(0, 10));
     });
 
+    const finishedTodayBot = finishedToday.filter(t => t.isBot).length;
+    const finishedTodayHuman = finishedToday.filter(t => !t.isBot).length;
+
     const finishedMonth = finished.filter(t => {
       const dateStr = t.closedAt || t.createdAt;
       if (!dateStr) return false;
