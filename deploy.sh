@@ -102,6 +102,11 @@ if [ $IS_UPDATE -eq 1 ]; then
     cd $APP_DIR
     git reset --hard
     git pull
+    
+    # Corrige problema de IPv6 no Node 20 com localhost do env existente
+    if [ -f ".env" ]; then
+        sed -i 's/DB_HOST=localhost/DB_HOST=127.0.0.1/g' .env
+    fi
 else
     # INSTALAÇÃO NOVA
     if [ "$(ls -A $APP_DIR)" ]; then
@@ -118,7 +123,7 @@ else
     echo -e "${YELLOW}Criando arquivo .env...${NC}"
     cat > .env <<EOL
 PORT=3000
-DB_HOST=localhost
+DB_HOST=127.0.0.1
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=${DB_NAME}
