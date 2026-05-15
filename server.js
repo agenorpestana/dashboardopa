@@ -66,7 +66,7 @@ async function opaRequest(baseUrl, path, token, body = null) {
       }
 
       const options = {
-        method: 'GET',
+        method: hasBody ? 'POST' : 'GET',
         headers,
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
@@ -300,17 +300,13 @@ async function startServer() {
       const token = config.api_token;
 
       const ticketId = req.params.id;
-      // Fetch ticket using filter instead of /:id which might not exist
-      const result = await opaRequest(baseUrl, `/atendimento`, token, {
-         filter: { _id: ticketId }
-      });
+      const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
+      
       if (!result.ok) {
          return res.status(result.status || 500).json(result);
       }
       
-      // Select the first one matched
-      const dataArray = Array.isArray(result.data?.data) ? result.data.data : (Array.isArray(result.data) ? result.data : []);
-      const ticketObj = dataArray.length > 0 ? dataArray[0] : null;
+      const ticketObj = result.data?.data || result.data;
       
       if (!ticketObj) {
          return res.status(404).json({ success: false, error: 'Protocolo não encontrado' });

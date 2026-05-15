@@ -26,27 +26,34 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
         let ticketJson = { success: false, error: 'Resposta inválida do servidor' };
         let messagesJson = { success: false, data: [] };
 
-        if (ticketRes.ok && ticketRes.headers.get('content-type')?.includes('application/json')) {
+        if (ticketRes.headers.get('content-type')?.includes('application/json')) {
            ticketJson = await ticketRes.json();
+           if (!ticketRes.ok) ticketJson.success = false;
         } else {
            const text = await ticketRes.text();
            console.error('Ticket response error:', ticketRes.status, text.substring(0, 100));
+           ticketJson = { success: false, error: `Erro HTTP ${ticketRes.status}: ${text.substring(0, 50)}` };
         }
 
-        if (messagesRes.ok && messagesRes.headers.get('content-type')?.includes('application/json')) {
+        if (messagesRes.headers.get('content-type')?.includes('application/json')) {
            messagesJson = await messagesRes.json();
+           if (!messagesRes.ok) messagesJson.success = false;
         } else {
            const text = await messagesRes.text();
            console.error('Messages response error:', messagesRes.status, text.substring(0, 100));
+           messagesJson = { success: false, error: `Erro HTTP ${messagesRes.status}: ${text.substring(0, 50)}`, data: [] };
         }
         
         if (ticketJson.success) {
           setTicketData(ticketJson.data);
         } else {
-          setErrorMsg(ticketJson.error ? JSON.stringify(ticketJson.error) : 'Erro ao buscar detalhes do protocolo.');
+          setErrorMsg((ticketJson.error && typeof ticketJson.error === 'object') ? JSON.stringify(ticketJson.error) : (ticketJson.error || 'Erro ao buscar detalhes do protocolo.'));
         }
         if (messagesJson.success) {
-          setMessages(messagesJson.data || []);
+          const allMsgs = messagesJson.data || [];
+          // O usuário quer apenas a conversa referente ao atendimento atual
+          const filteredMsgs = allMsgs.filter((m: any) => m.id_rota === ticketId || m.id_rota?._id === ticketId);
+          setMessages(filteredMsgs);
         }
       } catch (err: any) {
         console.error("Error fetching ticket data", err);
