@@ -16,6 +16,139 @@ const __dirname = dirname(__filename);
 dotenv.config();
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+const dbConfig = {
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'opadashboard',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+};
+
+const pool = mysql.createPool(dbConfig);
+
+async function initDB() {
+  try {
+    const connection = await pool.getConnection();
+    await connection.query(`CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(255) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+    await connection.query(`CREATE TABLE IF NOT EXISTS settings (id INT AUTO_INCREMENT PRIMARY KEY, api_url VARCHAR(255), api_token TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+    const [rows] = await connection.query('SELECT * FROM users WHERE username = ?', ['suporte']);
+    if (rows.length === 0) {
+      const salt = await bcrypt.genSalt(10);
+      const hash = await bcrypt.hash('200616', salt);
+      await connection.query('INSERT INTO users (username, password_hash) VALUES (?, ?)', ['suporte', hash]);
+    }
+    connection.release();
+  } catch (error) { console.error("Erro ao inicializar banco:", error.message); }
+}
+
+async function opaRequest(baseUrl, path, token, body = null) {
+  return new Promise((resolve) => {
+    try {
+      let finalUrlStr = baseUrl.replace(/\/$/, '');
+      if (!finalUrlStr.endsWith(path)) finalUrlStr += path;
+      
+      const url = new URL(finalUrlStr);
+      const lib = url.protocol === 'https:' ? https : http;
+      
+      const hasBody = body !== null && Object.keys(body).length > 0;
+      const jsonBody = hasBody ? JSON.stringify(body) : '';
+
+      const headers = { 
+        'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      };
+
+      if (hasBody) {
+        headers['Content-Length'] = Buffer.byteLength(jsonBody);
+      }
+
+      const options = {
+        method: 'GET',
+        headers,
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname,
+        rejectUnauthorized: false,
+        timeout: 60000 
+      };
+
+      const req = lib.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try { 
+            const parsed = JSON.parse(data);
+            if (res.statusCode >= 400) {
+                resolve({ ok: false, error: parsed, status: res.statusCode });
+            } else {
+                resolve({ ok: true, data: parsed }); 
+            }
+          }
+          catch (e) { 
+            resolve({ ok: false, error: 'JSON Parse Error', raw: data }); 
+          }
+        });
+      });
+
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ ok: false, error: 'Timeout' });
+      });
+
+      if (hasBody) {
+        req.write(jsonBody);
+      }
+      req.end();
+    } catch (e) { 
+      resolve({ ok: false, error: e.message }); 
+    }
+  });
+}
+
+async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords = 10000) {
+  let allData = [];
+  let skip = 0;
+  const limit = 1000;
+  let hasMore = true;
+
+  while (hasMore && allData.length < maxRecords) {
+    console.log(`Buscando bloco: ${skip} até ${skip + limit}...`);
+    const res = await opaRequest(baseUrl, path, token, {
+      filter,
+      options: { 
+        limit, 
+        skip, 
+        sort: { date: -1 },
+        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
+      }
+    });
+
+    if (!res.ok) {
+      console.error(`Erro na paginação no skip ${skip}:`, res.error);
+      break;
+    }
+
+    const data = (res.data?.status === "success") ? (res.data.data || []) : (Array.isArray(res.data) ? res.data : []);
+    
+    if (data.length === 0) {
+      hasMore = false;
+    } else {
+      allData = allData.concat(data);
+      if (data.length < limit) {
+        hasMore = false;
+      } else {
+        skip += limit;
+      }
+    }
+  }
+
+  return allData;
+}
+
 async function startServer() {
   await initDB();
 
@@ -168,7 +301,7 @@ async function startServer() {
 
       const ticketId = req.params.id;
       // For single GET, we don't send a body to be safe, or just send {} if opaRequest supports it.
-      const result = await opaRequest(baseUrl, \`/atendimento/\${ticketId}\`, token);
+      const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
       if (!result.ok) {
          return res.status(result.status || 500).json(result);
       }
@@ -192,7 +325,7 @@ async function startServer() {
 
       const ticketId = req.params.id;
       // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
-      const result = await opaRequest(baseUrl, \`/atendimento/mensagem\`, token, {
+      const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
         filter: { id_rota: ticketId },
         options: { limit: 100 }
       });
@@ -221,7 +354,7 @@ async function startServer() {
     app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
   }
 
-  app.listen(port, "0.0.0.0", () => console.log(\`Backend rodando na porta \${port}\`));
+  app.listen(port, "0.0.0.0", () => console.log(`Backend rodando na porta ${port}`));
 }
 
 startServer();
