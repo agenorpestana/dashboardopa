@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, User, Headset, MessageSquare, Clock, Calendar, Bot } from 'lucide-react';
+import { X, User, Headset, MessageSquare, Clock, Calendar, Bot, Timer } from 'lucide-react';
 import { Ticket } from '../types';
 
 interface TicketModalProps {
@@ -11,6 +11,41 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
   const [details, setDetails] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeDuration, setActiveDuration] = useState<string>('');
+
+  useEffect(() => {
+    if (!ticket.createdAt) return;
+
+    const calculateTime = () => {
+      // If it's already closed, calculate duration between creation and closed time
+      // Otherwise calculate from creation to now
+      const start = new Date(ticket.createdAt!).getTime();
+      const end = ticket.closedAt ? new Date(ticket.closedAt).getTime() : new Date().getTime();
+      const diffMs = end - start;
+
+      if (diffMs < 0) return setActiveDuration('0 minutos');
+
+      const diffMins = Math.floor(diffMs / 60000);
+      const days = Math.floor(diffMins / (24 * 60));
+      const hours = Math.floor((diffMins % (24 * 60)) / 60);
+      const mins = diffMins % 60;
+
+      const parts = [];
+      if (days > 0) parts.push(`${days} dia${days > 1 ? 's' : ''}`);
+      if (hours > 0) parts.push(`${hours} hora${hours > 1 ? 's' : ''}`);
+      if (mins > 0 || parts.length === 0) parts.push(`${mins} minuto${mins > 1 ? 's' : ''}`);
+
+      setActiveDuration(parts.join(' '));
+    };
+
+    calculateTime();
+    
+    // Only update periodically if the ticket is not closed
+    if (!ticket.closedAt) {
+      const timer = setInterval(calculateTime, 60000);
+      return () => clearInterval(timer);
+    }
+  }, [ticket.createdAt, ticket.closedAt]);
 
   useEffect(() => {
     let intervalId: number;
@@ -94,6 +129,13 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                 <span>•</span>
                 <Clock className="w-3 h-3" />
                 <span>{formatDate(ticket.createdAt)}</span>
+                {activeDuration && (
+                  <>
+                    <span>•</span>
+                    <Timer className="w-3 h-3 text-amber-500" />
+                    <span className="text-amber-400 font-medium">{activeDuration}</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
