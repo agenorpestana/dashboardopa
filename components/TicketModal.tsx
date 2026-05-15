@@ -13,15 +13,24 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
+    let intervalId: number;
+
+    const fetchData = async (isInitial = true) => {
+      if (isInitial) setLoading(true);
       try {
-        const [detailsRes, messagesRes] = await Promise.all([
-          fetch(`/api/ticket-details/${ticket.id}`).then(res => res.json()),
+        const promises = [
           fetch(`/api/ticket-messages/${ticket.id}`).then(res => res.json())
-        ]);
+        ];
         
-        if (detailsRes.success) setDetails(detailsRes.data);
+        if (isInitial) {
+          promises.push(fetch(`/api/ticket-details/${ticket.id}`).then(res => res.json()));
+        }
+
+        const results = await Promise.all(promises);
+        const messagesRes = results[0];
+        const detailsRes = isInitial ? results[1] : null;
+        
+        if (isInitial && detailsRes?.success) setDetails(detailsRes.data);
         if (messagesRes.success) {
           const sorted = (messagesRes.data || []).sort((a: any, b: any) => {
             return new Date(a.data).getTime() - new Date(b.data).getTime();
@@ -31,11 +40,17 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
       } catch (err) {
         console.error("Erro ao buscar detalhes:", err);
       } finally {
-        setLoading(false);
+        if (isInitial) setLoading(false);
       }
     };
     
-    fetchData();
+    fetchData(true);
+
+    intervalId = window.setInterval(() => {
+      fetchData(false);
+    }, 3000);
+
+    return () => clearInterval(intervalId);
   }, [ticket]);
 
   const formatDate = (dateStr: string) => {
