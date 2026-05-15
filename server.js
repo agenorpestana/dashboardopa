@@ -122,8 +122,7 @@ async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords =
       options: { 
         limit, 
         skip, 
-        sort: { date: -1 },
-        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
+        sort: { date: -1 }
       }
     });
 
