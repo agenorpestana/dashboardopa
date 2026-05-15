@@ -4,172 +4,300 @@
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=== Instalador/Atualizador Opa Suite Dashboard v2 ===${NC}"
+echo -e "${GREEN}=== Gerenciador de Instalação Multi-SaaS Unity ===${NC}"
 
 # Verificar se está rodando como root
-if [ "$EUID" -ne 0 ]; then 
-  echo -e "${RED}Por favor, execute como root (sudo ./deploy.sh)${NC}"
+if [ "$EUID" -ne 0 ]; then
+  echo -e "${RED}Por favor, execute como root (sudo ./gerenciar.sh)${NC}"
   exit
 fi
 
 # ==========================================
-# 1. Coleta de Dados Básicos
+# 0. Menu Principal: Ação
 # ==========================================
-echo -e "${YELLOW}Digite o domínio ou subdomínio (ex: dash.meudominio.com):${NC}"
-read DOMAIN
+echo -e "${BLUE}O que você deseja fazer?${NC}"
+echo "1) Instalar ou Atualizar um Sistema"
+echo "2) Desinstalar um Sistema existente"
+echo "3) Sair"
+read ACTION_CHOICE
 
-if [ -z "$DOMAIN" ]; then
-  echo -e "${RED}Domínio é obrigatório.${NC}"
-  exit 1
+if [ "$ACTION_CHOICE" -eq 3 ]; then exit 0; fi
+
+# ==========================================
+# 1. Seleção do Sistema
+# ==========================================
+echo -e "${YELLOW}Selecione o Sistema:${NC}"
+echo "1) Opa Suite Dashboard (Porta 3000)"
+echo "2) Unity Score SaaS (Porta 3001)"
+echo "3) Pastoral da Catequese (Porta 3002)"
+echo "4) ITL Cursos (Porta 3003)"
+echo "5) Rastreae (Porta 3004)"
+read SYSTEM_CHOICE
+
+case $SYSTEM_CHOICE in
+  1)
+    SYSTEM_NAME="Opa Suite Dashboard"
+    APP_PORT=3000
+    PM2_PREFIX="opa-dash-api"
+    DEFAULT_DB_NAME="opadashboard"
+    DEFAULT_DB_USER="opadash"
+    IS_CATEQUESE=0
+    ;;
+  2)
+    SYSTEM_NAME="Unity Score SaaS"
+    APP_PORT=3001
+    PM2_PREFIX="unity-score-api"
+    DEFAULT_DB_NAME="unity_saas"
+    DEFAULT_DB_USER="unity_user"
+    IS_CATEQUESE=0
+    ;;
+  3)
+    SYSTEM_NAME="Pastoral da Catequese"
+    APP_PORT=3002
+    PM2_PREFIX="catequese-api"
+    DEFAULT_DB_NAME="catequese_db"
+    DEFAULT_DB_USER="catequese_user"
+    IS_CATEQUESE=1
+    ;;
+  4)
+    SYSTEM_NAME="ITL Cursos"
+    APP_PORT=3003
+    PM2_PREFIX="itl-cursos-api"
+    DEFAULT_DB_NAME="itl_cursos"
+    DEFAULT_DB_USER="itl_user"
+    IS_CATEQUESE=0
+    ;;
+  5)
+    SYSTEM_NAME="Rastreae"
+    APP_PORT=3004
+    PM2_PREFIX="rastreae-api"
+    DEFAULT_DB_NAME="rastreae_db"
+    DEFAULT_DB_USER="rastreae_user"
+    IS_CATEQUESE=0
+    ;;
+  *)
+    echo -e "${RED}Opção inválida.${NC}"
+    exit 1
+    ;;
+esac
+
+# ==========================================
+# LÓGICA DE DESINSTALAÇÃO
+# ==========================================
+if [ "$ACTION_CHOICE" -eq 2 ]; then
+    echo -e "${RED}=== MODO DE DESINSTALAÇÃO ===${NC}"
+    echo -e "${YELLOW}Digite o domínio do sistema que deseja remover (ex: app.seudominio.com):${NC}"
+    read DOMAIN
+
+    if [ -z "$DOMAIN" ]; then
+      echo -e "${RED}Domínio é obrigatório para localizar a instalação.${NC}"
+      exit 1
+    fi
+
+    APP_DIR="/var/www/$DOMAIN"
+    SAFE_DOMAIN_SUFFIX=$(echo $DOMAIN | tr '.' '-')
+    PM2_NAME="${PM2_PREFIX}-${SAFE_DOMAIN_SUFFIX}"
+
+    echo -e "${RED}ATENÇÃO: Você está prestes a remover:${NC}"
+    echo -e "Sistema: $SYSTEM_NAME"
+    echo -e "Domínio: $DOMAIN"
+    echo -e "Processo PM2: $PM2_NAME"
+    echo ""
+    echo -e "${YELLOW}Tem certeza que deseja prosseguir? (s/n)${NC}"
+    read CONFIRM
+
+    if [ "$CONFIRM" != "s" ] && [ "$CONFIRM" != "S" ]; then
+        echo "Operação cancelada."
+        exit 0
+    fi
+
+    echo -e "${YELLOW}1. Parando e removendo processo PM2...${NC}"
+    pm2 delete "$PM2_NAME" 2>/dev/null
+    pm2 save
+
+    echo -e "${YELLOW}2. Removendo configurações do Nginx...${NC}"
+    rm -f "/etc/nginx/sites-available/$DOMAIN"
+    rm -f "/etc/nginx/sites-enabled/$DOMAIN"
+    systemctl reload nginx
+
+    echo -e "${YELLOW}3. Removendo Certificado SSL (se existir)...${NC}"
+    certbot delete --cert-name "$DOMAIN" --non-interactive 2>/dev/null
+
+    echo -e "${YELLOW}4. Removendo arquivos da aplicação...${NC}"
+    if [ -d "$APP_DIR" ]; then
+        rm -rf "$APP_DIR"
+        echo "Diretório $APP_DIR removido."
+    fi
+
+    echo -e "${YELLOW}5. Banco de Dados${NC}"
+    echo -e "${RED}Deseja EXCLUIR o Banco de Dados? (s/n)${NC}"
+    read DB_CONFIRM
+
+    if [ "$DB_CONFIRM" == "s" ] || [ "$DB_CONFIRM" == "S" ]; then
+        echo -e "${YELLOW}Digite o NOME EXATO do banco de dados para excluir:${NC}"
+        read DB_TO_DELETE
+        if [ ! -z "$DB_TO_DELETE" ]; then
+            echo -e "Digite a senha root do MySQL:"
+            read -s DB_ROOT_PASS
+            mysql -u root -p"$DB_ROOT_PASS" -e "DROP DATABASE IF EXISTS \`${DB_TO_DELETE}\`;"
+            echo -e "${GREEN}Banco removido.${NC}"
+        fi
+    fi
+
+    echo -e "${GREEN}=== Desinstalação Concluída! ===${NC}"
+    exit 0
 fi
+
+# ==========================================
+# LÓGICA DE INSTALAÇÃO / ATUALIZAÇÃO
+# ==========================================
+
+echo -e "${GREEN}>> Selecionado: $SYSTEM_NAME${NC}"
+
+echo -e "${YELLOW}Digite o domínio (ex: app.seudominio.com):${NC}"
+read DOMAIN
+if [ -z "$DOMAIN" ]; then exit 1; fi
 
 APP_DIR="/var/www/$DOMAIN"
+SAFE_DOMAIN_SUFFIX=$(echo $DOMAIN | tr '.' '-')
+PM2_NAME="${PM2_PREFIX}-${SAFE_DOMAIN_SUFFIX}"
+
+# Verifica se é atualização
 IS_UPDATE=0
+if [ -d "$APP_DIR/.git" ]; then IS_UPDATE=1; fi
 
-# Verifica se é uma atualização ou instalação nova
-if [ -d "$APP_DIR/.git" ]; then
-    echo -e "${GREEN}Instalação existente detectada em $APP_DIR.${NC}"
-    echo -e "${GREEN}Modo de ATUALIZAÇÃO ativado.${NC}"
-    IS_UPDATE=1
-else
-    echo -e "${GREEN}Nenhuma instalação encontrada em $APP_DIR.${NC}"
-    echo -e "${GREEN}Modo de NOVA INSTALAÇÃO ativado.${NC}"
-fi
+# Coleta de dados do Banco
+echo -e "${YELLOW}Configuração do Banco de Dados MySQL:${NC}"
+echo -e "Nome do Banco [${DEFAULT_DB_NAME}]:"
+read DB_NAME
+DB_NAME=${DB_NAME:-$DEFAULT_DB_NAME}
 
-# ==========================================
-# 2. Dados de Conexão (Só pede se necessário)
-# ==========================================
+echo -e "Usuário do Banco [${DEFAULT_DB_USER}]:"
+read DB_USER
+DB_USER=${DB_USER:-$DEFAULT_DB_USER}
 
-# Se for nova instalação OU se o arquivo .env não existir
-if [ $IS_UPDATE -eq 0 ] || [ ! -f "$APP_DIR/.env" ]; then
+echo -e "Senha do Banco:"
+read -s DB_PASSWORD
+echo
+
+if [ $IS_UPDATE -eq 0 ]; then
     echo -e "${YELLOW}Digite a URL do repositório GitHub:${NC}"
     read REPO_URL
-
-    echo -e "${YELLOW}Configuração do Banco de Dados MySQL:${NC}"
-    echo -e "Nome do Banco de Dados [opadashboard]:"
-    read DB_NAME
-    DB_NAME=${DB_NAME:-opadashboard}
-
-    echo -e "Usuário do Banco [opadash]:"
-    read DB_USER
-    DB_USER=${DB_USER:-opadash}
-
-    echo -e "Senha do Banco:"
-    read -s DB_PASSWORD
-    echo
 fi
 
-# ==========================================
-# 3. Pacotes do Sistema
-# ==========================================
-echo -e "${GREEN}Verificando pacotes do sistema...${NC}"
-apt update
-apt install -y nginx certbot python3-certbot-nginx curl git mysql-server build-essential
+# Instalação de dependências do sistema
+apt update && apt install -y nginx certbot python3-certbot-nginx curl git mysql-server build-essential
 
-# Node.js check (Versão 20 LTS)
-if ! command -v node &> /dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt install -y nodejs
-fi
-
-# PM2 check
-if ! command -v pm2 &> /dev/null; then
-    npm install -g pm2
-fi
-
-# ==========================================
-# 4. Configuração do MySQL (Garante usuário/banco)
-# ==========================================
-# Só executa setup de banco se tivermos a senha disponível (Nova instalação ou inserida manualmente)
+# Configuração MySQL - Ajustado para usar 127.0.0.1 em vez de localhost
 if [ ! -z "$DB_PASSWORD" ]; then
-    echo -e "${GREEN}Configurando MySQL...${NC}"
     mysql -u root -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME};"
-    mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
+    
+    # Criar e dar permissões para 127.0.0.1 (Força TCP/IP que evita bugs do Node IPv6)
+    mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '${DB_PASSWORD}';"
+    mysql -u root -e "ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '${DB_PASSWORD}';"
+    mysql -u root -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'127.0.0.1';"
+    
+    # Adicionar localhost também por garantia
+    mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED WITH mysql_native_password BY '${DB_PASSWORD}';"
+    mysql -u root -e "ALTER USER '${DB_USER}'@'localhost' IDENTIFIED WITH mysql_native_password BY '${DB_PASSWORD}';"
     mysql -u root -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
+    
     mysql -u root -e "FLUSH PRIVILEGES;"
 fi
 
-# ==========================================
-# 5. Gerenciamento do Código Fonte
-# ==========================================
+# Download do código
 mkdir -p $APP_DIR
-
 if [ $IS_UPDATE -eq 1 ]; then
-    # ATUALIZAÇÃO
-    echo -e "${YELLOW}Atualizando código fonte (git pull)...${NC}"
-    cd $APP_DIR
-    git reset --hard
-    git pull
-    
-    # Corrige problema de IPv6 no Node 20 com localhost do env existente
-    if [ -f ".env" ]; then
-        sed -i 's/DB_HOST=localhost/DB_HOST=127.0.0.1/g' .env
-    fi
+    cd $APP_DIR && git pull
 else
-    # INSTALAÇÃO NOVA
-    if [ "$(ls -A $APP_DIR)" ]; then
-       echo -e "${RED}O diretório $APP_DIR não está vazio. Limpando...${NC}"
-       rm -rf $APP_DIR/*
-       rm -rf $APP_DIR/.* 2>/dev/null
-    fi
-    
-    echo -e "${YELLOW}Clonando repositório...${NC}"
     git clone $REPO_URL $APP_DIR
     cd $APP_DIR
+fi
+
+# ==========================================
+# Correção do IPv6 e .env no DB_HOST
+# ==========================================
+if [ $IS_UPDATE -eq 1 ]; then
+    # Se ja existe, atualiza as strings no env
+    if [ -f "$APP_DIR/.env" ]; then
+        sed -i 's/DB_HOST=localhost/DB_HOST=127.0.0.1/g' "$APP_DIR/.env"
+    fi
+    if [ -f "$APP_DIR/server/.env" ]; then
+        sed -i 's/DB_HOST=localhost/DB_HOST=127.0.0.1/g' "$APP_DIR/server/.env"
+    fi
+fi
+
+# Configuração e Build
+if [ "$IS_CATEQUESE" -eq 1 ]; then
+    # Lógica Pastoral da Catequese
+    cd "$APP_DIR/server"
+    npm install
     
-    # Criar .env apenas na instalação nova
-    echo -e "${YELLOW}Criando arquivo .env...${NC}"
+    # Usando cat com EOF para evitar problema com o \n que havia no script original
     cat > .env <<EOL
-PORT=3000
 DB_HOST=127.0.0.1
 DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
+DB_PASSWORD="${DB_PASSWORD}"
 DB_NAME=${DB_NAME}
+PORT=${APP_PORT}
 EOL
+
+    cd "$APP_DIR"
+    npm install && npm run build
+    PM2_START_DIR="$APP_DIR/server"
+    PM2_SCRIPT="index.js"
+else
+    # Lógica Genérica (ITL, Rastreae, Opa, Unity)
+    cd $APP_DIR
+
+    cat > .env <<EOL
+PORT=${APP_PORT}
+DB_HOST=127.0.0.1
+DB_USER=${DB_USER}
+DB_PASSWORD="${DB_PASSWORD}"
+DB_NAME=${DB_NAME}
+NODE_ENV=production
+EOL
+
+    npm install && npm run build
+    PM2_START_DIR="$APP_DIR"
+
+    # Para o ITL Cursos que usa server.ts, usamos tsx se não houver server.js compilado
+    if [ -f "server.js" ]; then
+        PM2_SCRIPT="server.js"
+    else
+        PM2_SCRIPT="server.ts"
+    fi
 fi
 
-# ==========================================
-# 6. Build
-# ==========================================
-echo -e "${GREEN}Instalando dependências e compilando...${NC}"
-npm install
-npm run build
-
-if [ ! -d "dist" ]; then
-    echo -e "${RED}Erro: Falha no build. A pasta 'dist' não foi criada.${NC}"
-    exit 1
+# PM2
+cd $PM2_START_DIR
+pm2 delete $PM2_NAME 2>/dev/null
+if [[ "$PM2_SCRIPT" == *.ts ]]; then
+    PORT=$APP_PORT pm2 start "npx tsx $PM2_SCRIPT" --name "$PM2_NAME"
+else
+    PORT=$APP_PORT pm2 start "$PM2_SCRIPT" --name "$PM2_NAME"
 fi
-
-# ==========================================
-# 7. Gerenciamento de Processos (PM2)
-# ==========================================
-echo -e "${GREEN}Reiniciando Backend...${NC}"
-# Para e remove processo antigo para garantir atualização das variáveis e código
-pm2 delete opa-dash-api 2>/dev/null
-# Agora inicia o server.js
-pm2 start server.js --name "opa-dash-api"
 pm2 save
 
-# ==========================================
-# 8. Nginx e SSL
-# ==========================================
+# Nginx
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
+WEB_ROOT="$APP_DIR/dist"
+if [ ! -d "$WEB_ROOT" ] && [ -d "$APP_DIR/build" ]; then WEB_ROOT="$APP_DIR/build"; fi
 
-if [ ! -f "$NGINX_CONF" ]; then
-    echo -e "${GREEN}Configurando Nginx...${NC}"
-    cat > $NGINX_CONF <<EOL
+cat > $NGINX_CONF <<EOL
 server {
     listen 80;
     server_name $DOMAIN;
-
-    root $APP_DIR/dist;
+    root $WEB_ROOT;
     index index.html;
+    client_max_body_size 200M;
 
-    # Proxy para API
-    location /api/ {
-        proxy_pass http://localhost:3000;
+    location /api {
+        proxy_pass http://localhost:$APP_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -177,35 +305,18 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 
-    # SPA Frontend
     location / {
         try_files \$uri \$uri/ /index.html;
     }
-
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, no-transform";
-    }
 }
 EOL
+ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
+nginx -t && systemctl restart nginx
 
-    ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
-    rm -f /etc/nginx/sites-enabled/default
-    
-    # Testa configuração
-    nginx -t
-    systemctl restart nginx
-
-    echo -e "${YELLOW}Configurando SSL (Let's Encrypt)...${NC}"
-    certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN --redirect
-else
-    echo -e "${GREEN}Configuração Nginx já existente. Reiniciando serviço...${NC}"
-    systemctl restart nginx
-fi
+# SSL
+certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN --redirect
 
 echo -e "${GREEN}=== Processo Concluído! ===${NC}"
-echo -e "1. Acesse: https://$DOMAIN"
-if [ $IS_UPDATE -eq 0 ]; then
-    echo -e "2. Vá em Configurações > Login"
-    echo -e "3. Usuário: suporte | Senha: 200616"
-fi
+echo -e "URL: https://$DOMAIN"
+echo -e "Porta: $APP_PORT"
+echo -e "PM2: $PM2_NAME"
