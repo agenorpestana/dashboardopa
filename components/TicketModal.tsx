@@ -156,9 +156,8 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
                   {messages.length > 0 ? (
                     messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).map((msg, index) => {
-                      // Se tem id_user (ou destinatario é quem tem id_user no payload anterior), é cliente
-                      // Aqui vamos simplificar: se tem id_user é cliente. Se tem id_atend é atendente/bot.
-                      const isClient = !!msg.id_user;
+                      // Aqui vamos determinar: se tem id_atend no root da mensagem, foi o atendente/bot. Se não tem, foi o cliente.
+                      const isClient = !msg.id_atend;
                       return (
                         <div key={msg._id || index} className={`flex ${isClient ? 'justify-end' : 'justify-start'}`}>
                           <div className={`max-w-[80%] rounded-xl p-3 ${isClient ? 'bg-sky-600/20 border border-sky-600/30 text-sky-100' : 'bg-slate-800 border border-slate-700 text-slate-300'}`}>

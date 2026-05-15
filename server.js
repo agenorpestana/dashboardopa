@@ -300,13 +300,23 @@ async function startServer() {
       const token = config.api_token;
 
       const ticketId = req.params.id;
-      // For single GET, we don't send a body to be safe, or just send {} if opaRequest supports it.
-      const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
+      // Fetch ticket using filter instead of /:id which might not exist
+      const result = await opaRequest(baseUrl, `/atendimento`, token, {
+         filter: { _id: ticketId }
+      });
       if (!result.ok) {
          return res.status(result.status || 500).json(result);
       }
       
-      res.json({ success: true, data: result.data?.data || result.data });
+      // Select the first one matched
+      const dataArray = Array.isArray(result.data?.data) ? result.data.data : (Array.isArray(result.data) ? result.data : []);
+      const ticketObj = dataArray.length > 0 ? dataArray[0] : null;
+      
+      if (!ticketObj) {
+         return res.status(404).json({ success: false, error: 'Protocolo não encontrado' });
+      }
+
+      res.json({ success: true, data: ticketObj });
 
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
@@ -324,10 +334,10 @@ async function startServer() {
       const token = config.api_token;
 
       const ticketId = req.params.id;
-      // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
+      // Many times Opa filter id_rota expects string directly
       const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
-        filter: { id_rota: { $in: [ticketId, { _id: ticketId }] } },
-        options: { limit: 200, sort: { date: 1 } }
+        filter: { id_rota: ticketId },
+        options: { limit: 500, sort: { date: 1 } }
       });
       
       if (!result.ok) {
