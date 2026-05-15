@@ -26,34 +26,27 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
         let ticketJson = { success: false, error: 'Resposta inválida do servidor' };
         let messagesJson = { success: false, data: [] };
 
-        if (ticketRes.headers.get('content-type')?.includes('application/json')) {
+        if (ticketRes.ok && ticketRes.headers.get('content-type')?.includes('application/json')) {
            ticketJson = await ticketRes.json();
-           if (!ticketRes.ok) ticketJson.success = false;
         } else {
            const text = await ticketRes.text();
            console.error('Ticket response error:', ticketRes.status, text.substring(0, 100));
-           ticketJson = { success: false, error: `Erro HTTP ${ticketRes.status}: ${text.substring(0, 50)}` };
         }
 
-        if (messagesRes.headers.get('content-type')?.includes('application/json')) {
+        if (messagesRes.ok && messagesRes.headers.get('content-type')?.includes('application/json')) {
            messagesJson = await messagesRes.json();
-           if (!messagesRes.ok) messagesJson.success = false;
         } else {
            const text = await messagesRes.text();
            console.error('Messages response error:', messagesRes.status, text.substring(0, 100));
-           messagesJson = { success: false, error: `Erro HTTP ${messagesRes.status}: ${text.substring(0, 50)}`, data: [] };
         }
         
         if (ticketJson.success) {
           setTicketData(ticketJson.data);
         } else {
-          setErrorMsg((ticketJson.error && typeof ticketJson.error === 'object') ? JSON.stringify(ticketJson.error) : (ticketJson.error || 'Erro ao buscar detalhes do protocolo.'));
+          setErrorMsg(ticketJson.error ? JSON.stringify(ticketJson.error) : 'Erro ao buscar detalhes do protocolo.');
         }
         if (messagesJson.success) {
-          const allMsgs = messagesJson.data || [];
-          // O usuário quer apenas a conversa referente ao atendimento atual
-          const filteredMsgs = allMsgs.filter((m: any) => m.id_rota === ticketId || m.id_rota?._id === ticketId);
-          setMessages(filteredMsgs);
+          setMessages(messagesJson.data || []);
         }
       } catch (err: any) {
         console.error("Error fetching ticket data", err);
@@ -163,8 +156,9 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticketId, onClose }) =
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
                   {messages.length > 0 ? (
                     messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).map((msg, index) => {
-                      // Aqui vamos determinar: se tem id_atend no root da mensagem, foi o atendente/bot. Se não tem, foi o cliente.
-                      const isClient = !msg.id_atend;
+                      // Se tem id_user (ou destinatario é quem tem id_user no payload anterior), é cliente
+                      // Aqui vamos simplificar: se tem id_user é cliente. Se tem id_atend é atendente/bot.
+                      const isClient = !!msg.id_user;
                       return (
                         <div key={msg._id || index} className={`flex ${isClient ? 'justify-end' : 'justify-start'}`}>
                           <div className={`max-w-[80%] rounded-xl p-3 ${isClient ? 'bg-sky-600/20 border border-sky-600/30 text-sky-100' : 'bg-slate-800 border border-slate-700 text-slate-300'}`}>

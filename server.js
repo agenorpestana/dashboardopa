@@ -66,7 +66,7 @@ async function opaRequest(baseUrl, path, token, body = null) {
       }
 
       const options = {
-        method: hasBody ? 'POST' : 'GET',
+        method: 'GET',
         headers,
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
@@ -122,7 +122,8 @@ async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords =
       options: { 
         limit, 
         skip, 
-        sort: { date: -1 }
+        sort: { date: -1 },
+        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
       }
     });
 
@@ -152,7 +153,7 @@ async function startServer() {
   await initDB();
 
   const app = express();
-  const port = 3000;
+  const port = process.env.PORT || 3000;
 
   app.use(cors());
   app.use(express.json());
@@ -299,19 +300,13 @@ async function startServer() {
       const token = config.api_token;
 
       const ticketId = req.params.id;
+      // For single GET, we don't send a body to be safe, or just send {} if opaRequest supports it.
       const result = await opaRequest(baseUrl, `/atendimento/${ticketId}`, token);
-      
       if (!result.ok) {
          return res.status(result.status || 500).json(result);
       }
       
-      const ticketObj = result.data?.data || result.data;
-      
-      if (!ticketObj) {
-         return res.status(404).json({ success: false, error: 'Protocolo não encontrado' });
-      }
-
-      res.json({ success: true, data: ticketObj });
+      res.json({ success: true, data: result.data?.data || result.data });
 
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
@@ -329,10 +324,10 @@ async function startServer() {
       const token = config.api_token;
 
       const ticketId = req.params.id;
-      // Many times Opa filter id_rota expects string directly
+      // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
       const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
-        filter: { id_rota: ticketId },
-        options: { limit: 500, sort: { date: 1 } }
+        filter: { id_rota: { $in: [ticketId, { _id: ticketId }] } },
+        options: { limit: 200, sort: { date: 1 } }
       });
       
       if (!result.ok) {
