@@ -109,6 +109,7 @@ export const opaService = {
           durationSeconds: (status === 'in_service' || status === 'finished') ? calculateDuration(t.date, t.fim) : 0,
           status,
           attendantName: attName,
+          attendantId: attId,
           department: deptName,
           departmentId: deptId,
           createdAt: t.date,
