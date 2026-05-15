@@ -304,5 +304,33 @@ app.get('/api/ticket/:id', async (req, res) => {
   }
 });
 
+app.get('/api/ticket/:id/messages', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
+    
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+    const token = config.api_token;
+
+    const ticketId = req.params.id;
+    // Pelo payload da plataforma, id_rota corresponde ao ticketId (id do atendimento)
+    const result = await opaRequest(baseUrl, `/atendimento/mensagem`, token, {
+      filter: { id_rota: ticketId },
+      options: { limit: 100 }
+    });
+    
+    if (!result.ok) {
+       return res.status(result.status || 500).json(result);
+    }
+    
+    res.json({ success: true, data: result.data?.data || result.data });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
 app.listen(port, () => console.log(`Backend rodando na porta ${port}`));
