@@ -32,9 +32,13 @@ function formatPhone(value: string): string {
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
   if (s === 'F') return 'finished';
-  if (s === 'AG' || s === 'A') return 'waiting';
   if (s === 'PS') return 'bot';
   if (s === 'EA' || s === 'E') return 'in_service';
+  
+  if (s === 'AG' || s === 'A') {
+    const hasTags = Array.isArray(t.tags) && t.tags.length > 0;
+    return hasTags ? 'waiting' : 'bot';
+  }
   
   if (t.isBot) return 'bot';
   if (t.id_atendente && s !== 'F') return 'in_service';
