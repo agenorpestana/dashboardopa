@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { X, User, Headset, MessageSquare, Clock, Calendar, Bot, Timer } from 'lucide-react';
 import { Ticket } from '../types';
 
@@ -12,6 +12,17 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDuration, setActiveDuration] = useState<string>('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     if (!ticket.createdAt) return;
@@ -251,6 +262,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   )
                 })
               )}
+              <div ref={messagesEndRef} />
             </div>
           </div>
         </div>
