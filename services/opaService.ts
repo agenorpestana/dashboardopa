@@ -29,22 +29,14 @@ function formatPhone(value: string): string {
   return value;
 }
 
-const WAITING_ROOM_SECTOR_IDS = [
-  '5bf73d1d186f7d2b0d647a60', // Comercial
-  '5bf73d1d186f7d2b0d647a61', // Suporte
-  '5d1624085e74a002308aa25e'  // Financeiro
-];
-
 function determineTicketStatus(t: any): TicketStatus {
   const s = String(t.status || '').toUpperCase().trim();
   if (s === 'F') return 'finished';
-  if (t.isBot) return 'bot';
+  if (s === 'AG' || s === 'A') return 'waiting';
+  if (s === 'PS') return 'bot';
   if (s === 'EA' || s === 'E') return 'in_service';
-  const deptObj = t.id_motivo_atendimento || t.id_setor;
-  const deptId = typeof deptObj === 'object' ? String(deptObj?._id || '') : String(deptObj || '');
-  if ((s === 'AG' || s === 'A') && WAITING_ROOM_SECTOR_IDS.includes(deptId)) {
-    return 'waiting';
-  }
+  
+  if (t.isBot) return 'bot';
   if (t.id_atendente && s !== 'F') return 'in_service';
   return 'bot'; 
 }
