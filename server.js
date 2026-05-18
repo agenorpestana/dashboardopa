@@ -119,39 +119,59 @@ async function opaRequest(baseUrl, path, token, body = {}) {
  */
 async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords = 80000) {
   let allData = [];
-  let skip = 0;
-  const limit = 5000; // Aumentado para 5000 por página para reduzir requests
+  const requestLimit = 1000;
+  let currentSkip = 0;
   let hasMore = true;
+  const BATCH_SIZE = 5; // Configura para baixar 5 páginas (5000 registros) simultaneamente
 
   while (hasMore && allData.length < maxRecords) {
-    console.log(`Buscando bloco: ${skip} até ${skip + limit}...`);
-    const res = await opaRequest(baseUrl, path, token, {
-      filter,
-      options: { 
-        limit, 
-        skip, 
-        sort: { date: -1 },
-        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome', 'isBot']
-      }
-    });
-
-    if (!res.ok) {
-      console.error(`Erro na paginação no skip ${skip}:`, res.error);
-      break;
-    }
-
-    const data = (res.data?.status === "success") ? (res.data.data || []) : (Array.isArray(res.data) ? res.data : []);
+    console.log(`Buscando lote de blocos paralelos a partir do skip: ${currentSkip}...`);
+    const promises = [];
     
-    if (data.length === 0) {
-      hasMore = false;
-    } else {
-      allData = allData.concat(data);
-      if (data.length < limit) {
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      const skip = currentSkip + (i * requestLimit);
+      if (skip >= maxRecords) break;
+      
+      promises.push(
+        opaRequest(baseUrl, path, token, {
+          filter,
+          options: { 
+            limit: requestLimit, 
+            skip, 
+            sort: { date: -1 },
+            fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome', 'isBot']
+          }
+        })
+      );
+    }
+
+    if (promises.length === 0) break;
+
+    const results = await Promise.all(promises);
+
+    for (let i = 0; i < results.length; i++) {
+      const res = results[i];
+      if (!res.ok) {
+        console.error(`Erro na paginação no lote:`, res.error);
         hasMore = false;
+        break;
+      }
+
+      const data = (res.data?.status === "success") ? (res.data.data || []) : (Array.isArray(res.data) ? res.data : []);
+      
+      if (data.length === 0) {
+        hasMore = false;
+        break;
       } else {
-        skip += limit;
+        allData = allData.concat(data);
+        if (data.length < requestLimit) {
+           hasMore = false; // Se uma página não veio cheia, é a última
+           break;
+        }
       }
     }
+    
+    currentSkip += requestLimit * BATCH_SIZE;
   }
 
   return allData;
@@ -311,7 +331,14 @@ app.get('/api/dashboard-data', async (req, res) => {
 app.get('/api/media-proxy', async (req, res) => {
   try {
     const mediaUrl = req.query.url;
-    const fileId = req.query.id;
+    let fileId = req.query.id;
+    
+    // Extrait MongoDB ObjectId from URL to fetch metadata via API 
+    // avoiding the HTML login page on web endpoints
+    if (mediaUrl && !fileId) {
+       const match = mediaUrl.match(/[a-fA-F0-9]{24}/);
+       if (match) fileId = match[0];
+    }
     
     if (!mediaUrl && !fileId) return res.status(400).send('URL or ID missing');
 

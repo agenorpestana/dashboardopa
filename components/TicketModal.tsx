@@ -280,7 +280,9 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   }
 
                   let fileUrl = rawFileUrl || '';
-                  if (!fileUrl && fileIdParam) {
+                  if (fileUrl && !fileUrl.includes('s3.amazonaws') && !fileUrl.includes('s3') && fileUrl.startsWith('http')) {
+                     fileUrl = `/api/media-proxy?url=${encodeURIComponent(fileUrl)}`;
+                  } else if (!fileUrl && fileIdParam) {
                      fileUrl = `/api/media-proxy?id=${fileIdParam}`;
                   }
 
