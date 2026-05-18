@@ -5,7 +5,7 @@ import { StatCard } from './StatCard';
 import { TicketList } from './TicketList';
 import { TicketModal } from './TicketModal';
 import { Clock, Headset, Timer, Bot, Activity, CalendarCheck, CheckCircle2, BarChart3, Star, ListFilter, User } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
   tickets: Ticket[];
@@ -164,6 +164,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
     console.groupEnd();
   }, [departments, periods, stats.detailedLogs, stats.departmentSummary, stats.finished]);
 
+  const last6MonthsData = useMemo(() => {
+    const data = [];
+    const now = new Date();
+    
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const month = d.getMonth();
+      const year = d.getFullYear();
+      const monthLabel = `${String(month + 1).padStart(2, '0')}/${year}`;
+      
+      const monthTickets = tickets.filter(t => {
+        const tDateStr = t.createdAt || t.closedAt;
+        if (!tDateStr) return false;
+        const tDate = new Date(String(tDateStr).replace(' ', 'T'));
+        return tDate.getMonth() === month && tDate.getFullYear() === year;
+      });
+
+      const checkIsBot = (t: Ticket) => t.isBot || t.attendantName === 'Víctor' || t.attendantName?.toLowerCase().includes('bot');
+      
+      const bot = monthTickets.filter(checkIsBot).length;
+      const total = monthTickets.length;
+      const humano = total - bot;
+      
+      data.push({
+        name: monthLabel,
+        bot,
+        humano,
+        total
+      });
+    }
+    return data;
+  }, [tickets]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
       <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 shadow-xl space-y-5">
@@ -299,6 +332,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
           type="in_service" 
           onTicketClick={setSelectedTicket}
         />
+      </div>
+
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-sky-500" />
+            Atendimentos (Últimos 6 Meses)
+          </h3>
+        </div>
+        
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={last6MonthsData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+              <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
+              <Tooltip 
+                cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
+              />
+              <Legend wrapperStyle={{ paddingTop: '20px' }} />
+              <Bar dataKey="bot" name="Bot" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="humano" name="Humano" fill="#10b981" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="total" name="Total" fill="#38bdf8" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {selectedTicket && (

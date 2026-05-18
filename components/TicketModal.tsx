@@ -279,13 +279,9 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                     textContent = '';
                   }
 
-                  let fileUrl = rawFileUrl;
-                  if (fileIdParam) {
+                  let fileUrl = rawFileUrl || '';
+                  if (!fileUrl && fileIdParam) {
                      fileUrl = `/api/media-proxy?id=${fileIdParam}`;
-                  } else if (rawFileUrl) {
-                    if (!rawFileUrl.includes('amazonaws') && !rawFileUrl.includes('s3')) {
-                       fileUrl = `/api/media-proxy?url=${encodeURIComponent(rawFileUrl)}`;
-                    }
                   }
 
                   const isImage = ['imagem', 'image'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
