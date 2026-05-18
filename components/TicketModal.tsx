@@ -249,7 +249,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   let rawFileUrl = msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || msg.arquivo_url || msg.link || msg.anexo?.url || (Array.isArray(msg.arquivos) && msg.arquivos[0]?.url) || (Array.isArray(msg.anexos) && msg.anexos[0]?.url);
                   let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
 
-                  const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt'].includes(String(msg.tipo).toLowerCase()) || !!rawFileUrl || (textContent && textContent.match(/\.(jpeg|jpg|gif|png|webp|mp3|ogg|wav|mp4|webm|pdf|doc|docx)($|\?)/i));
+                  const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt', 'midia', 'media'].includes(String(msg.tipo).toLowerCase()) || !!rawFileUrl || (textContent && textContent.match(/\.(jpeg|jpg|gif|png|webp|mp3|ogg|wav|mp4|webm|pdf|doc|docx)($|\?)/i));
                   
                   let fileIdParam = '';
                   
@@ -262,10 +262,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                     }
                   } else if (msg.arquivo?._id || msg.id_arquivo) {
                      fileIdParam = msg.arquivo?._id || msg.id_arquivo;
+                  } else if (msg.objeto && typeof msg.objeto === 'string' && /^[a-fA-F0-9]{24}$/.test(msg.objeto)) {
+                     fileIdParam = msg.objeto;
                   } else if (msg.arquivoId || msg.fileId || msg.id) {
                      // speculative
-                     if (/^[a-fA-F0-9]{24}$/.test(msg.arquivoId)) fileIdParam = msg.arquivoId;
-                     else if (/^[a-fA-F0-9]{24}$/.test(msg.id_arquivo)) fileIdParam = msg.id_arquivo;
+                     if (msg.arquivoId && /^[a-fA-F0-9]{24}$/.test(msg.arquivoId)) fileIdParam = msg.arquivoId;
+                     else if (msg.id_arquivo && /^[a-fA-F0-9]{24}$/.test(msg.id_arquivo)) fileIdParam = msg.id_arquivo;
                   }
 
                   // If still no url but msg has a direct url property
@@ -286,9 +288,9 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                     }
                   }
 
-                  const isImage = msg.tipo === 'imagem' || msg.tipo === 'image' || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (textContent && textContent.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
-                  const isAudio = msg.tipo === 'audio' || msg.tipo === 'áudio' || msg.tipo === 'ptt' || (rawFileUrl && rawFileUrl.match(/\.(mp3|ogg|wav)($|\?)/i)) || (textContent && textContent.match(/\.(mp3|ogg|wav)($|\?)/i));
-                  const isVideo = msg.tipo === 'video' || msg.tipo === 'vídeo' || (rawFileUrl && rawFileUrl.match(/\.(mp4|webm)($|\?)/i)) || (textContent && textContent.match(/\.(mp4|webm)($|\?)/i));
+                  const isImage = ['imagem', 'image'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
+                  const isAudio = ['audio', 'áudio', 'ptt'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(mp3|ogg|wav)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(mp3|ogg|wav)($|\?)/i));
+                  const isVideo = ['video', 'vídeo'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(mp4|webm)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(mp4|webm)($|\?)/i));
 
                   return (
                     <div key={msg._id || i} className={`w-full flex ${isClient ? 'justify-start' : 'justify-end'}`}>
