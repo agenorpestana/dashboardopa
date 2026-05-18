@@ -321,6 +321,11 @@ app.get('/api/media-proxy', async (req, res) => {
 
     const contentType = response.headers.get('content-type');
     
+    if (contentType && contentType.includes('text/html')) {
+       console.log("Media proxy returned HTML (likely login page).");
+       return res.status(401).send("Falha de autenticação com a API do Opa Suite. O sistema retornou uma página HTML (provavelmente a tela de login). Verifique seu Token de API ou se o endpoint suporta download direto.");
+    }
+
     if (contentType && contentType.includes('application/json')) {
        const json = await response.json();
        console.log("Media proxy returned JSON instead of file directly:", json);

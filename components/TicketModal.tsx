@@ -319,9 +319,23 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                             {textContent && <p className="text-sm whitespace-pre-wrap">{textContent}</p>}
                             {fileUrl ? (
                               <div className="mt-2">
-                                {isImage && <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" />}
-                                {isAudio && <audio src={fileUrl} controls className="max-w-full h-10" />}
-                                {isVideo && <video src={fileUrl} controls className="max-w-full rounded-lg max-h-64" />}
+                                {isImage && (
+                                  <a href={fileUrl} target="_blank" rel="noreferrer" className="block max-w-full mb-1">
+                                    <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" />
+                                  </a>
+                                )}
+                                {isAudio && (
+                                  <div className="flex flex-col gap-1">
+                                    <audio src={fileUrl} controls className="max-w-full h-10" />
+                                    <a href={fileUrl} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Abrir áudio (nova guia)</a>
+                                  </div>
+                                )}
+                                {isVideo && (
+                                  <div className="flex flex-col gap-1">
+                                    <video src={fileUrl} controls className="max-w-full rounded-lg max-h-64" />
+                                    <a href={fileUrl} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Abrir vídeo (nova guia)</a>
+                                  </div>
+                                )}
                                 {(!isImage && !isAudio && !isVideo) && (
                                   <a href={fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sky-400 bg-sky-950 p-2 rounded hover:bg-sky-900 transition-colors text-xs font-medium">
                                     📎 Ver Anexo
