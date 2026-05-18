@@ -187,6 +187,28 @@ app.post('/api/settings', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false }); }
 });
 
+app.get('/api/debug-dump', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+    
+    // fetch finished tickets
+    const tkRes = await fetch(`${baseUrl}/atendimento`, { headers: { 'Authorization': `Bearer ${config.api_token}` } });
+    const tkJson = await tkRes.json();
+    if (tkJson.data && tkJson.data.length) {
+       for (const t of tkJson.data.slice(0, 10)) {
+           const amRes = await fetch(`${baseUrl}/atendimento/${t._id}/mensagens`, { headers: { 'Authorization': `Bearer ${config.api_token}` } });
+           const amJson = await amRes.json();
+           const hasMedia = amJson.data?.find(m => m.arquivo || m.url_s3 || m.anexo || m.objeto || m.tipo === 'imagem' || m.tipo === 'ptt' || m.tipo === 'audio');
+           if (hasMedia) return res.json(hasMedia);
+       }
+    }
+    res.json({ error: 'Not found' });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
 app.get('/api/dashboard-data', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
@@ -198,8 +220,9 @@ app.get('/api/dashboard-data', async (req, res) => {
     const token = config.api_token;
 
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const year = startDate.getFullYear();
+    const month = String(startDate.getMonth() + 1).padStart(2, '0');
     const dateFilter = `${year}-${month}-01 00:00:00`;
     
     const ROBOT_ID = '5d1642ad4b16a50312cc8f4d';

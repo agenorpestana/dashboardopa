@@ -246,7 +246,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   const hasMenu = typeof msg.mensagem === 'object' && msg.mensagem !== null;
 
                   // Collect common URLs from Opa Suite formats
-                  let rawFileUrl = msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || msg.arquivo_url || msg.link || msg.anexo?.url || (Array.isArray(msg.arquivos) && msg.arquivos[0]?.url) || (Array.isArray(msg.anexos) && msg.anexos[0]?.url);
+                  let rawFileUrl = msg.url_s3 || msg.s3_url || msg.aws_url || msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || msg.arquivo_url || msg.link || msg.anexo?.url || (Array.isArray(msg.arquivos) && msg.arquivos[0]?.url) || (Array.isArray(msg.anexos) && msg.anexos[0]?.url);
                   let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
 
                   const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt', 'midia', 'media'].includes(String(msg.tipo).toLowerCase()) || !!rawFileUrl || (textContent && textContent.match(/\.(jpeg|jpg|gif|png|webp|mp3|ogg|wav|mp4|webm|pdf|doc|docx)($|\?)/i));
