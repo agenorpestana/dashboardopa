@@ -14,11 +14,11 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
   const [activeDuration, setActiveDuration] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const isUserScrolling = useRef(false);
 
   const scrollToBottom = () => {
-    if (messagesEndRef.current && !isUserScrolling) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current && !isUserScrolling.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
     }
   };
 
@@ -29,12 +29,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
     // Check if the user has scrolled up from the bottom (allow 50px tolerance)
     const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
     
-    setIsUserScrolling(!isAtBottom);
+    isUserScrolling.current = !isAtBottom;
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isUserScrolling]);
+  }, [messages]);
 
   useEffect(() => {
     if (!ticket.createdAt) return;
@@ -246,17 +246,40 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   const hasMenu = typeof msg.mensagem === 'object' && msg.mensagem !== null;
 
                   const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt'].includes(msg.tipo);
-                  let fileUrl = msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || (typeof msg.arquivo === 'string' ? msg.arquivo : null);
-                  let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
                   
-                  if (isMedia && !fileUrl && textContent.startsWith('http')) {
-                    fileUrl = textContent;
+                  // Collect common URLs from Opa Suite formats
+                  let rawFileUrl = msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || msg.arquivo_url || msg.link || msg.anexo?.url || (Array.isArray(msg.arquivos) && msg.arquivos[0]?.url) || (Array.isArray(msg.anexos) && msg.anexos[0]?.url);
+                  let fileIdParam = '';
+                  
+                  if (typeof msg.arquivo === 'string' && msg.arquivo.length > 0) {
+                    if (msg.arquivo.startsWith('http')) {
+                      if (!rawFileUrl) rawFileUrl = msg.arquivo;
+                    } else if (/^[a-fA-F0-9]{24}$/.test(msg.arquivo)) {
+                      // It's a Mongo ID.
+                      fileIdParam = msg.arquivo;
+                    }
+                  } else if (msg.arquivo?._id || msg.id_arquivo) {
+                     fileIdParam = msg.arquivo?._id || msg.id_arquivo;
+                  }
+
+                  let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
+                  if (isMedia && !rawFileUrl && !fileIdParam && textContent.startsWith('http')) {
+                    rawFileUrl = textContent;
                     textContent = '';
                   }
 
-                  const isImage = msg.tipo === 'imagem' || msg.tipo === 'image' || (fileUrl && fileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
-                  const isAudio = msg.tipo === 'audio' || msg.tipo === 'áudio' || msg.tipo === 'ptt' || (fileUrl && fileUrl.match(/\.(mp3|ogg|wav)($|\?)/i));
-                  const isVideo = msg.tipo === 'video' || msg.tipo === 'vídeo' || (fileUrl && fileUrl.match(/\.(mp4|webm)($|\?)/i));
+                  let fileUrl = rawFileUrl;
+                  if (fileIdParam) {
+                     fileUrl = `/api/media-proxy?id=${fileIdParam}`;
+                  } else if (rawFileUrl) {
+                    if (!rawFileUrl.includes('amazonaws') && !rawFileUrl.includes('s3')) {
+                       fileUrl = `/api/media-proxy?url=${encodeURIComponent(rawFileUrl)}`;
+                    }
+                  }
+
+                  const isImage = msg.tipo === 'imagem' || msg.tipo === 'image' || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (textContent && textContent.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
+                  const isAudio = msg.tipo === 'audio' || msg.tipo === 'áudio' || msg.tipo === 'ptt' || (rawFileUrl && rawFileUrl.match(/\.(mp3|ogg|wav)($|\?)/i)) || (textContent && textContent.match(/\.(mp3|ogg|wav)($|\?)/i));
+                  const isVideo = msg.tipo === 'video' || msg.tipo === 'vídeo' || (rawFileUrl && rawFileUrl.match(/\.(mp4|webm)($|\?)/i)) || (textContent && textContent.match(/\.(mp4|webm)($|\?)/i));
 
                   return (
                     <div key={msg._id || i} className={`w-full flex ${isClient ? 'justify-start' : 'justify-end'}`}>
@@ -283,7 +306,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                         ) : (
                           <>
                             {textContent && <p className="text-sm whitespace-pre-wrap">{textContent}</p>}
-                            {fileUrl && (
+                            {fileUrl ? (
                               <div className="mt-2">
                                 {isImage && <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" />}
                                 {isAudio && <audio src={fileUrl} controls className="max-w-full h-10" />}
@@ -294,6 +317,13 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                                   </a>
                                 )}
                               </div>
+                            ) : (
+                               isMedia && (
+                                 <details className="mt-2 text-[10px] text-slate-500 bg-slate-900/50 p-2 rounded overflow-hidden">
+                                   <summary className="cursor-pointer text-sky-400 hover:text-sky-300">Mostrar dados do anexo (Debug)</summary>
+                                   <pre className="whitespace-pre-wrap break-words mt-1">{JSON.stringify(msg, null, 2)}</pre>
+                                 </details>
+                               )
                             )}
                           </>
                         )}

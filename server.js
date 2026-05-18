@@ -280,6 +280,52 @@ app.get('/api/dashboard-data', async (req, res) => {
   }
 });
 
+app.get('/api/media-proxy', async (req, res) => {
+  try {
+    const mediaUrl = req.query.url;
+    const fileId = req.query.id;
+    
+    if (!mediaUrl && !fileId) return res.status(400).send('URL or ID missing');
+
+    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const config = rows[0];
+    const token = config?.api_token;
+    
+    let targetUrl = mediaUrl;
+    
+    if (fileId) {
+      let baseUrl = config?.api_url?.trim().replace(/\/$/, '') || '';
+      if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
+      targetUrl = `${baseUrl}/arquivo/${fileId}`;
+    }
+
+    const response = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send(`Error fetching media: ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
+    }
+    
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    res.end(buffer);
+  } catch (error) {
+    console.error('Media proxy error:', error);
+    res.status(500).send('Error proxying media');
+  }
+});
+
 app.get('/api/ticket-details/:id', async (req, res) => {
   try {
     const { id } = req.params;
