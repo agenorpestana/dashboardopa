@@ -117,10 +117,10 @@ async function opaRequest(baseUrl, path, token, body = {}) {
 /**
  * Função para buscar dados com paginação automática
  */
-async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords = 10000) {
+async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords = 80000) {
   let allData = [];
   let skip = 0;
-  const limit = 1000;
+  const limit = 5000; // Aumentado para 5000 por página para reduzir requests
   let hasMore = true;
 
   while (hasMore && allData.length < maxRecords) {
@@ -131,7 +131,7 @@ async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords =
         limit, 
         skip, 
         sort: { date: -1 },
-        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome']
+        fields: ['_id', 'protocolo', 'date', 'fim', 'id_atendente', 'id_setor', 'id_motivo_atendimento', 'cliente_nome', 'isBot']
       }
     });
 
@@ -189,17 +189,17 @@ app.post('/api/settings', async (req, res) => {
 
 app.get('/api/debug-dump', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    const config = rows[0];
-    let baseUrl = config.api_url.trim().replace(/\/$/, '');
+    const api_url = req.query.url;
+    const api_token = req.query.token;
+    if (!api_url || !api_token) return res.status(400).send('Missing url or token query params');
+    let baseUrl = api_url.trim().replace(/\/$/, '');
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     
-    // fetch finished tickets
-    const tkRes = await fetch(`${baseUrl}/atendimento`, { headers: { 'Authorization': `Bearer ${config.api_token}` } });
+    const tkRes = await fetch(`${baseUrl}/atendimento`, { headers: { 'Authorization': `Bearer ${api_token}` } });
     const tkJson = await tkRes.json();
     if (tkJson.data && tkJson.data.length) {
        for (const t of tkJson.data.slice(0, 10)) {
-           const amRes = await fetch(`${baseUrl}/atendimento/${t._id}/mensagens`, { headers: { 'Authorization': `Bearer ${config.api_token}` } });
+           const amRes = await fetch(`${baseUrl}/atendimento/${t._id}/mensagens`, { headers: { 'Authorization': `Bearer ${api_token}` } });
            const amJson = await amRes.json();
            const hasMedia = amJson.data?.find(m => m.arquivo || m.url_s3 || m.anexo || m.objeto || m.tipo === 'imagem' || m.tipo === 'ptt' || m.tipo === 'audio');
            if (hasMedia) return res.json(hasMedia);
@@ -242,7 +242,7 @@ app.get('/api/dashboard-data', async (req, res) => {
         status: 'F',
         date: { $gte: dateFilter } 
       },
-      15000 // Limite de segurança para não exceder memória
+      80000 // Aumentado limite de segurança de 15000 para 80000 para cobrir 6 meses de dados
     );
 
     // 3. USUÁRIOS
@@ -321,18 +321,54 @@ app.get('/api/media-proxy', async (req, res) => {
     
     let targetUrl = mediaUrl;
     
+    // Tentativa 1: Fazer POST para buscar metadados do arquivo se for um ID
     if (fileId) {
       let baseUrl = config?.api_url?.trim().replace(/\/$/, '') || '';
       if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
-      targetUrl = `${baseUrl}/arquivo/${fileId}`;
+      targetUrl = `${baseUrl}/arquivo/${fileId}`; // Mantém o GET normal como fallback
+
+      try {
+        console.log("Tentando buscar metadados do arquivo via POST na API...");
+        const metaRes = await fetch(`${baseUrl}/arquivo`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ filter: { _id: fileId } })
+        });
+        const metaJson = await metaRes.json();
+        if (metaJson.data && metaJson.data.length > 0) {
+           const fileData = metaJson.data[0];
+           console.log("Metadados do arquivo encontrados:", { url: fileData.url, url_s3: fileData.url_s3 });
+           if (fileData.url_s3) {
+             targetUrl = fileData.url_s3;
+           } else if (fileData.url) {
+             targetUrl = fileData.url;
+           } else if (fileData.base64) {
+             const buffer = Buffer.from(fileData.base64, 'base64');
+             res.setHeader('Content-Type', fileData.tipo || 'application/octet-stream');
+             return res.send(buffer);
+           }
+        }
+      } catch (e) {
+        console.error("Falha ao bucar metadados do arquivo via POST:", e);
+      }
     }
 
-    const response = await fetch(targetUrl, {
+    console.log("Media Proxy Requesting:", targetUrl);
+    
+    const fetchOptions = {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
+      headers: {}
+    };
+    
+    // Only add Bearer token if we are hitting the Opa API server directly
+    if (targetUrl.includes(config?.api_url?.trim().replace(/\/$/, '') || '')) {
+       fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    let response = await fetch(targetUrl, fetchOptions);
 
     console.log("Media response status:", response.status, response.headers.get('content-type'));
 
