@@ -245,10 +245,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   const isClient = msg.tipoDestinatario === "usuarios" || msg.tipoDestinatario === "atendentes";
                   const hasMenu = typeof msg.mensagem === 'object' && msg.mensagem !== null;
 
-                  const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt'].includes(msg.tipo);
-                  
                   // Collect common URLs from Opa Suite formats
                   let rawFileUrl = msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || msg.arquivo_url || msg.link || msg.anexo?.url || (Array.isArray(msg.arquivos) && msg.arquivos[0]?.url) || (Array.isArray(msg.anexos) && msg.anexos[0]?.url);
+                  let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
+
+                  const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt'].includes(String(msg.tipo).toLowerCase()) || !!rawFileUrl || (textContent && textContent.match(/\.(jpeg|jpg|gif|png|webp|mp3|ogg|wav|mp4|webm|pdf|doc|docx)($|\?)/i));
+                  
                   let fileIdParam = '';
                   
                   if (typeof msg.arquivo === 'string' && msg.arquivo.length > 0) {
@@ -260,9 +262,16 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                     }
                   } else if (msg.arquivo?._id || msg.id_arquivo) {
                      fileIdParam = msg.arquivo?._id || msg.id_arquivo;
+                  } else if (msg.arquivoId || msg.fileId || msg.id) {
+                     // speculative
+                     if (/^[a-fA-F0-9]{24}$/.test(msg.arquivoId)) fileIdParam = msg.arquivoId;
+                     else if (/^[a-fA-F0-9]{24}$/.test(msg.id_arquivo)) fileIdParam = msg.id_arquivo;
                   }
 
-                  let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
+                  // If still no url but msg has a direct url property
+                  if (!rawFileUrl && msg.url) rawFileUrl = msg.url;
+
+
                   if (isMedia && !rawFileUrl && !fileIdParam && textContent.startsWith('http')) {
                     rawFileUrl = textContent;
                     textContent = '';
