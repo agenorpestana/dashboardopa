@@ -13,16 +13,28 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
   const [loading, setLoading] = useState(true);
   const [activeDuration, setActiveDuration] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
 
   const scrollToBottom = () => {
-    if (messagesEndRef.current) {
+    if (messagesEndRef.current && !isUserScrolling) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
+  const handleScroll = () => {
+    if (!messagesContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    
+    // Check if the user has scrolled up from the bottom (allow 50px tolerance)
+    const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
+    
+    setIsUserScrolling(!isAtBottom);
+  };
+
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isUserScrolling]);
 
   useEffect(() => {
     if (!ticket.createdAt) return;
@@ -212,7 +224,11 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
               Histórico da Conversa
             </h3>
             
-            <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-4 custom-scrollbar">
+            <div 
+              ref={messagesContainerRef}
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto px-5 pb-5 space-y-4 custom-scrollbar"
+            >
               {loading ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3 opacity-50">
                    <div className="w-8 h-8 border-2 border-sky-500/30 border-t-sky-500 rounded-full animate-spin"></div>
@@ -228,6 +244,19 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                   const isSystem = msg.tipo === "menuInterativo";
                   const isClient = msg.tipoDestinatario === "usuarios" || msg.tipoDestinatario === "atendentes";
                   const hasMenu = typeof msg.mensagem === 'object' && msg.mensagem !== null;
+
+                  const isMedia = ['imagem', 'image', 'audio', 'áudio', 'video', 'vídeo', 'documento', 'document', 'arquivo', 'ptt'].includes(msg.tipo);
+                  let fileUrl = msg.arquivo?.url_s3 || msg.arquivo?.url || msg.url || (typeof msg.arquivo === 'string' ? msg.arquivo : null);
+                  let textContent = typeof msg.mensagem === 'string' ? msg.mensagem : '';
+                  
+                  if (isMedia && !fileUrl && textContent.startsWith('http')) {
+                    fileUrl = textContent;
+                    textContent = '';
+                  }
+
+                  const isImage = msg.tipo === 'imagem' || msg.tipo === 'image' || (fileUrl && fileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
+                  const isAudio = msg.tipo === 'audio' || msg.tipo === 'áudio' || msg.tipo === 'ptt' || (fileUrl && fileUrl.match(/\.(mp3|ogg|wav)($|\?)/i));
+                  const isVideo = msg.tipo === 'video' || msg.tipo === 'vídeo' || (fileUrl && fileUrl.match(/\.(mp4|webm)($|\?)/i));
 
                   return (
                     <div key={msg._id || i} className={`w-full flex ${isClient ? 'justify-start' : 'justify-end'}`}>
@@ -252,7 +281,21 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                             ))}
                           </div>
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap">{msg.mensagem}</p>
+                          <>
+                            {textContent && <p className="text-sm whitespace-pre-wrap">{textContent}</p>}
+                            {fileUrl && (
+                              <div className="mt-2">
+                                {isImage && <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" />}
+                                {isAudio && <audio src={fileUrl} controls className="max-w-full h-10" />}
+                                {isVideo && <video src={fileUrl} controls className="max-w-full rounded-lg max-h-64" />}
+                                {(!isImage && !isAudio && !isVideo) && (
+                                  <a href={fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sky-400 bg-sky-950 p-2 rounded hover:bg-sky-900 transition-colors text-xs font-medium">
+                                    📎 Ver Anexo
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </>
                         )}
                         <p className="text-[10px] text-right mt-2 opacity-50 flex justify-end gap-2 items-center">
                           {formatDate(msg.data)}
