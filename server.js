@@ -6,6 +6,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import fs from 'fs';
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
@@ -16,8 +17,12 @@ const __dirname = dirname(__filename);
 dotenv.config();
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+import { createServer as createViteServer } from 'vite';
+
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Vite middleware defined later
 
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
@@ -49,7 +54,7 @@ initDB();
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(join(__dirname, 'dist')));
+
 
 async function opaRequest(baseUrl, path, token, body = {}) {
   return new Promise((resolve) => {
@@ -306,23 +311,60 @@ app.get('/api/media-proxy', async (req, res) => {
       }
     });
 
+    console.log("Media response status:", response.status, response.headers.get('content-type'));
+
     if (!response.ok) {
-      return res.status(response.status).send(`Error fetching media: ${response.statusText}`);
+      const text = await response.text();
+      console.log("Media fetch error text:", text);
+      return res.status(response.status).send(`Error fetching media: ${response.status} - ${text}`);
     }
 
     const contentType = response.headers.get('content-type');
-    if (contentType) {
-      res.setHeader('Content-Type', contentType);
-    }
     
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    if (contentType && contentType.includes('application/json')) {
+       const json = await response.json();
+       console.log("Media proxy returned JSON instead of file directly:", json);
+       if (json.data && json.data.url) {
+           // redirect to the actual url or fetch it
+           const actUrl = json.data.url;
+           const newRes = await fetch(actUrl);
+           const buf = await newRes.arrayBuffer();
+           res.setHeader('Content-Type', newRes.headers.get('content-type') || 'application/octet-stream');
+           return res.send(Buffer.from(buf));
+       }
+       return res.status(500).json(json);
+    }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    res.end(buffer);
+    if (!contentType || (!contentType.includes('application/json'))) {
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const total = buffer.length;
+        
+        if (req.headers.range) {
+            const parts = req.headers.range.replace(/bytes=/, "").split("-");
+            const partialstart = parts[0];
+            const partialend = parts[1];
+            
+            const start = parseInt(partialstart, 10);
+            const end = partialend ? parseInt(partialend, 10) : total - 1;
+            const chunksize = (end - start) + 1;
+            
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Content-Length', chunksize);
+            if(contentType) res.setHeader('Content-Type', contentType);
+            return res.send(buffer.slice(start, end + 1));
+        }
+
+        res.setHeader('Content-Length', total);
+        res.setHeader('Accept-Ranges', 'bytes');
+        if(contentType) res.setHeader('Content-Type', contentType);
+        return res.send(buffer);
+    }
   } catch (error) {
     console.error('Media proxy error:', error);
-    res.status(500).send('Error proxying media');
+    res.status(500).json({ error: String(error), stack: error?.stack });
   }
 });
 
@@ -374,5 +416,18 @@ app.get('/api/ticket-messages/:routeId', async (req, res) => {
   }
 });
 
-app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
-app.listen(port, () => console.log(`Backend rodando na porta ${port}`));
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(join(__dirname, 'dist')));
+    app.get('*', (req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')));
+  }
+
+  app.listen(port, "0.0.0.0", () => console.log(`Backend rodando na porta ${port}`));
+}
+startServer();
