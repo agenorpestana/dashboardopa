@@ -350,6 +350,8 @@ app.get('/api/media-proxy', async (req, res) => {
   try {
     const mediaUrl = req.query.url;
     let fileId = req.query.id;
+    let token = req.query.token;
+    let baseUrlParam = req.query.baseUrl;
     
     // Extrait MongoDB ObjectId from URL to fetch metadata via API 
     // avoiding the HTML login page on web endpoints
@@ -360,9 +362,21 @@ app.get('/api/media-proxy', async (req, res) => {
     
     if (!mediaUrl && !fileId) return res.status(400).send('URL or ID missing');
 
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    const config = rows[0];
-    const token = config?.api_token;
+    let config = {};
+    if (!token) {
+        try {
+            const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+            config = rows[0] || {};
+            token = config.api_token;
+        } catch(e) {
+            console.error("DB skip", e.message);
+        }
+    }
+    
+    const finalToken = token || '';
+    let baseUrl = baseUrlParam || config.api_url || '';
+    baseUrl = baseUrl.trim().replace(/\/$/, '');
+    if (baseUrl && !baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     
     let targetUrl = mediaUrl;
     

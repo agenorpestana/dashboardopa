@@ -286,6 +286,13 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                      fileUrl = `/api/media-proxy?id=${fileIdParam}`;
                   }
 
+                  // External fallback URL for direct browser access
+                  let externalDirectFallback = rawFileUrl;
+                  if (!externalDirectFallback && fileIdParam) {
+                     // The login session is required to open the actual API url directly
+                     externalDirectFallback = `https://atendimento.itlfibra.com/arquivo/${fileIdParam}`;
+                  }
+
                   const isImage = ['imagem', 'image'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
                   const isAudio = ['audio', 'áudio', 'ptt'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(mp3|ogg|wav)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(mp3|ogg|wav)($|\?)/i));
                   const isVideo = ['video', 'vídeo'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(mp4|webm)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(mp4|webm)($|\?)/i));
@@ -318,25 +325,32 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                             {fileUrl ? (
                               <div className="mt-2">
                                 {isImage && (
-                                  <a href={fileUrl} target="_blank" rel="noreferrer" className="block max-w-full mb-1">
-                                    <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" />
+                                  <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="block max-w-full mb-1">
+                                    <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" onError={(e) => {
+                                       if (e.currentTarget.src !== externalDirectFallback) e.currentTarget.src = externalDirectFallback; 
+                                    }}/>
+                                    <span className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Se não carregar, clique para abrir (requer login Opa Suite em outra aba)</span>
                                   </a>
                                 )}
                                 {isAudio && (
                                   <div className="flex flex-col gap-1">
-                                    <audio src={fileUrl} controls className="max-w-full h-10" />
-                                    <a href={fileUrl} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Abrir áudio (nova guia)</a>
+                                    <audio src={fileUrl} controls className="max-w-full h-10" onError={(e) => {
+                                         if (e.currentTarget.src !== externalDirectFallback) e.currentTarget.src = externalDirectFallback; 
+                                    }}/>
+                                    <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Dificuldades em ouvir? Abra o áudio diretamente (requer login Opa Suite em outra aba)</a>
                                   </div>
                                 )}
                                 {isVideo && (
                                   <div className="flex flex-col gap-1">
-                                    <video src={fileUrl} controls className="max-w-full rounded-lg max-h-64" />
-                                    <a href={fileUrl} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Abrir vídeo (nova guia)</a>
+                                    <video src={fileUrl} controls className="max-w-full rounded-lg max-h-64" onError={(e) => {
+                                        if (e.currentTarget.src !== externalDirectFallback) e.currentTarget.src = externalDirectFallback; 
+                                    }}/>
+                                    <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Abrir vídeo diretamente (requer login Opa Suite em outra aba)</a>
                                   </div>
                                 )}
                                 {(!isImage && !isAudio && !isVideo) && (
-                                  <a href={fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sky-400 bg-sky-950 p-2 rounded hover:bg-sky-900 transition-colors text-xs font-medium">
-                                    📎 Ver Anexo
+                                  <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sky-400 bg-sky-950 p-2 rounded hover:bg-sky-900 transition-colors text-xs font-medium">
+                                    📎 Ver Arquivo (Requer login Opa Suite em outra aba)
                                   </a>
                                 )}
                               </div>
