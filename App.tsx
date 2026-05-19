@@ -127,7 +127,7 @@ const App: React.FC = () => {
           ) : (
             <>
               {currentView === 'dashboard' && (
-                <Dashboard tickets={tickets} attendants={attendants} departments={departments} periods={periods} />
+                <Dashboard tickets={tickets} attendants={attendants} departments={departments} periods={periods} config={config} />
               )}
               {currentView === 'settings' && (
                 <Settings config={config} onSave={handleSaveConfig} />

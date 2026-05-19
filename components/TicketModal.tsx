@@ -5,9 +5,10 @@ import { Ticket } from '../types';
 interface TicketModalProps {
   ticket: Ticket;
   onClose: () => void;
+  config: import('../types').AppConfig;
 }
 
-export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => {
+export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, config }) => {
   const [details, setDetails] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -279,11 +280,19 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                     textContent = '';
                   }
 
+                  let proxyParams = ``;
+                  if (config && config.apiUrl) {
+                      proxyParams += `&baseUrl=${encodeURIComponent(config.apiUrl)}`;
+                  }
+                  if (config && config.apiToken) {
+                      proxyParams += `&token=${encodeURIComponent(config.apiToken)}`;
+                  }
+
                   let fileUrl = rawFileUrl || '';
                   if (fileUrl && !fileUrl.includes('s3.amazonaws') && !fileUrl.includes('s3') && fileUrl.startsWith('http')) {
-                     fileUrl = `/api/media-proxy?url=${encodeURIComponent(fileUrl)}`;
+                     fileUrl = `/api/media-proxy?url=${encodeURIComponent(fileUrl)}${proxyParams}`;
                   } else if (!fileUrl && fileIdParam) {
-                     fileUrl = `/api/media-proxy?id=${fileIdParam}`;
+                     fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
                   }
 
                   // External fallback URL for direct browser access
@@ -292,11 +301,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
                      externalDirectFallback = externalDirectFallback.replace(/\/([a-fA-F0-9]{24})$/, '/arquivo/$1');
                   }
                   if (!externalDirectFallback && fileIdParam) {
-                     // The login session is required to open the actual API url directly
-                     let domainMatches = window.location.origin; // default to current window domain if config unavailable
-                     // If we have token, we are operating with client-side config? Not easily available here.
-                     // But we can guess the main domain by substituting /api... or we just rely on fileId
-                     externalDirectFallback = `/api/media-proxy?id=${fileIdParam}`; // fallback to proxy if we don't have main domain
+                     if (config && config.apiUrl) {
+                        let mainDomainUrl = config.apiUrl.trim().replace(/\/api\/v1\/?$/, '').replace(/\/$/, '') || '';
+                        externalDirectFallback = `${mainDomainUrl}/arquivo/${fileIdParam}`;
+                     } else {
+                        externalDirectFallback = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
+                     }
                   }
 
                   const isImage = ['imagem', 'image'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));

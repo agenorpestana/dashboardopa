@@ -12,6 +12,7 @@ interface DashboardProps {
   attendants: Attendant[];
   departments: Department[];
   periods: any[];
+  config: import('../types').AppConfig;
 }
 
 const formatTime = (seconds: number) => {
@@ -22,7 +23,7 @@ const formatTime = (seconds: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, departments, periods }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, departments, periods, config }) => {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   const stats = useMemo(() => {
@@ -365,6 +366,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
         <TicketModal 
           ticket={selectedTicket} 
           onClose={() => setSelectedTicket(null)} 
+          config={config}
         />
       )}
     </div>

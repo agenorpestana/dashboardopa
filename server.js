@@ -198,10 +198,22 @@ app.post('/api/login', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false }); }
 });
 
-app.get('/api/settings', async (req, res) => {
+let configCache = null;
+
+async function getConfig() {
   try {
     const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
-    res.json(rows[0] || {});
+    configCache = rows[0] || {};
+  } catch(e) {
+    if(!configCache) throw e;
+  }
+  return configCache;
+}
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const config = await getConfig();
+    res.json(config);
   } catch (error) { 
     console.error('Settings DB error:', error);
     res.status(500).json({ error: 'Erro ao buscar configurações', details: String(error) }); 
@@ -263,8 +275,7 @@ app.get('/api/debug-dump', async (req, res) => {
 
 app.get('/api/dashboard-data', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    const config = rows[0];
+    const config = await getConfig();
     if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
     
     let baseUrl = config.api_url.trim().replace(/\/$/, '');
@@ -379,16 +390,14 @@ app.get('/api/media-proxy', async (req, res) => {
     let config = {};
     if (!token) {
         try {
-            const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
-            config = rows[0] || {};
+            config = await getConfig();
             token = config.api_token;
         } catch(e) {
             console.error("DB skip", e.message);
         }
     } else {
         try {
-            const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
-            config = rows[0] || {};
+            config = await getConfig();
         } catch(e) { }
     }
     
@@ -522,8 +531,7 @@ app.get('/api/media-proxy', async (req, res) => {
 app.get('/api/ticket-details/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    const config = rows[0];
+    const config = await getConfig();
     if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
     
     let baseUrl = config.api_url.trim().replace(/\/$/, '');
@@ -544,8 +552,7 @@ app.get('/api/ticket-details/:id', async (req, res) => {
 app.get('/api/ticket-messages/:routeId', async (req, res) => {
   try {
     const { routeId } = req.params;
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
-    const config = rows[0];
+    const config = await getConfig();
     if (!config || !config.api_url) return res.status(400).json({ error: 'Configuração pendente' });
     
     let baseUrl = config.api_url.trim().replace(/\/$/, '');
