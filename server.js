@@ -447,6 +447,10 @@ app.get('/api/media-proxy', async (req, res) => {
 
     // Attempt to download the file directly
     let targetUrls = [];
+    if (targetUrl) {
+        targetUrls.push(targetUrl);
+    }
+    
     if (fileId) {
         targetUrls.push(`${baseUrl}/arquivo/${fileId}`);
         targetUrls.push(`${baseUrl}/arquivo/download/${fileId}`);
@@ -457,8 +461,6 @@ app.get('/api/media-proxy', async (req, res) => {
         targetUrls.push(`${mainDomainUrl}/arquivos/${fileId}`);
         targetUrls.push(`${mainDomainUrl}/storage/arquivo/${fileId}`);
         targetUrls.push(`${mainDomainUrl}/storage/arquivos/${fileId}`);
-    } else {
-        targetUrls.push(targetUrl);
     }
 
     const fetchOptions = {
@@ -475,13 +477,20 @@ app.get('/api/media-proxy', async (req, res) => {
     for (let url of targetUrls) {
         console.log("Media Proxy Requesting URL:", url);
         try {
-            response = await fetch(url, fetchOptions);
+            let currentOptions = { method: 'GET', headers: {} };
+            if (!url.includes('s3.amazonaws.com') && !url.includes('storage.googleapis.com') && !url.includes('X-Amz-Signature')) {
+                currentOptions.headers['Authorization'] = `Bearer ${finalToken}`;
+            }
+
+            response = await fetch(url, currentOptions);
             if (response.ok) {
                 contentType = response.headers.get('content-type') || '';
                 if (!contentType.includes('text/html')) {
                      finalValidUrl = url;
                      break; // Found a valid non-HTML response!
                 }
+            } else {
+                console.log(`URL ${url} returned status ${response.status}`);
             }
         } catch(e) {
             console.error("Error fetching", url, e.message);
