@@ -215,17 +215,35 @@ app.get('/api/debug-dump', async (req, res) => {
     let baseUrl = api_url.trim().replace(/\/$/, '');
     if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     
-    const tkRes = await fetch(`${baseUrl}/atendimento`, { headers: { 'Authorization': `Bearer ${api_token}` } });
-    const tkJson = await tkRes.json();
-    if (tkJson.data && tkJson.data.length) {
-       for (const t of tkJson.data.slice(0, 10)) {
-           const amRes = await fetch(`${baseUrl}/atendimento/${t._id}/mensagens`, { headers: { 'Authorization': `Bearer ${api_token}` } });
-           const amJson = await amRes.json();
-           const hasMedia = amJson.data?.find(m => m.arquivo || m.url_s3 || m.anexo || m.objeto || m.tipo === 'imagem' || m.tipo === 'ptt' || m.tipo === 'audio');
-           if (hasMedia) return res.json(hasMedia);
-       }
+    const fileId = req.query.id || '6a0b5e687b773394b83d8ee0';
+    
+    const urlsToTest = [
+      `${baseUrl}/arquivo/${fileId}`,
+      `${baseUrl}/arquivos/${fileId}`,
+      `${baseUrl}/arquivo/${fileId}/download`,
+      `${baseUrl}/atendimento/arquivos/${fileId}`
+    ];
+    
+    const results = [];
+    for (const url of urlsToTest) {
+      try {
+        const fetchRes = await fetch(url, { headers: { 'Authorization': `Bearer ${api_token}` } });
+        const type = fetchRes.headers.get('content-type');
+        const isJson = type && type.includes('json');
+        let data = '';
+        if (isJson) {
+          data = await fetchRes.json();
+        } else {
+          const text = await fetchRes.text();
+          data = text.substring(0, 100);
+        }
+        results.push({ url, status: fetchRes.status, type: type, data });
+      } catch (err) {
+        results.push({ url, error: err.message });
+      }
     }
-    res.json({ error: 'Not found' });
+    
+    res.json({ results });
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
@@ -383,76 +401,13 @@ app.get('/api/media-proxy', async (req, res) => {
       }
     }
 
-    console.log("Media Proxy Requesting:", targetUrl);
+    console.log("Media Proxy Redirecting to:", targetUrl);
     
-    const fetchOptions = {
-      method: 'GET',
-      headers: {}
-    };
-    
-    // Only add Bearer token if we are hitting the Opa API server directly
-    if (targetUrl.includes(config?.api_url?.trim().replace(/\/$/, '') || '')) {
-       fetchOptions.headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    let response = await fetch(targetUrl, fetchOptions);
-
-    console.log("Media response status:", response.status, response.headers.get('content-type'));
-
-    if (!response.ok) {
-      const text = await response.text();
-      console.log("Media fetch error text:", text);
-      return res.status(response.status).send(`Error fetching media: ${response.status} - ${text}`);
-    }
-
-    const contentType = response.headers.get('content-type');
-    
-    if (contentType && contentType.includes('text/html')) {
-       console.log("Media proxy returned HTML (likely login page).");
-       return res.status(401).send("Falha de autenticação com a API do Opa Suite. O sistema retornou uma página HTML (provavelmente a tela de login). Verifique seu Token de API ou se o endpoint suporta download direto.");
-    }
-
-    if (contentType && contentType.includes('application/json')) {
-       const json = await response.json();
-       console.log("Media proxy returned JSON instead of file directly:", json);
-       if (json.data && json.data.url) {
-           // redirect to the actual url or fetch it
-           const actUrl = json.data.url;
-           const newRes = await fetch(actUrl);
-           const buf = await newRes.arrayBuffer();
-           res.setHeader('Content-Type', newRes.headers.get('content-type') || 'application/octet-stream');
-           return res.send(Buffer.from(buf));
-       }
-       return res.status(500).json(json);
-    }
-
-    if (!contentType || (!contentType.includes('application/json'))) {
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const total = buffer.length;
-        
-        if (req.headers.range) {
-            const parts = req.headers.range.replace(/bytes=/, "").split("-");
-            const partialstart = parts[0];
-            const partialend = parts[1];
-            
-            const start = parseInt(partialstart, 10);
-            const end = partialend ? parseInt(partialend, 10) : total - 1;
-            const chunksize = (end - start) + 1;
-            
-            res.status(206);
-            res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
-            res.setHeader('Accept-Ranges', 'bytes');
-            res.setHeader('Content-Length', chunksize);
-            if(contentType) res.setHeader('Content-Type', contentType);
-            return res.send(buffer.slice(start, end + 1));
-        }
-
-        res.setHeader('Content-Length', total);
-        res.setHeader('Accept-Ranges', 'bytes');
-        if(contentType) res.setHeader('Content-Type', contentType);
-        return res.send(buffer);
-    }
+    // As the files are protected by the user's session cookies on the Opa Suite domain,
+    // we cannot proxy them via a server-side fetch with a Bearer token (which returns an HTML login page).
+    // Instead, we redirect the browser to the actual URL so it uses the S3 public link 
+    // or native cookies for authentication.
+    return res.redirect(targetUrl);
   } catch (error) {
     console.error('Media proxy error:', error);
     res.status(500).json({ error: String(error), stack: error?.stack });
