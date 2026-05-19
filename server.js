@@ -20,7 +20,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
 
 // Vite middleware defined later
 
@@ -532,10 +532,6 @@ app.get('/api/media-proxy', async (req, res) => {
         res.setHeader('Accept-Ranges', 'bytes');
         if(contentType) res.setHeader('Content-Type', contentType);
         return res.send(buffer);
-    } else {
-       console.log("Fetch failed, redirecting to targetUrl...");
-       return res.redirect(targetUrl);
-    }
   } catch (error) {
     console.error('Media proxy error:', error);
     res.status(500).json({ error: String(error), stack: error?.stack });
@@ -585,16 +581,6 @@ app.get('/api/ticket-messages/:routeId', async (req, res) => {
     res.json({ success: true, data: result.data?.data || [] });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/test-db', async (req, res) => {
-  try {
-    const pool = await getDbPool();
-    const [rows] = await pool.query('SELECT * FROM msgs WHERE id_arquivo = ? OR arquivo = ? LIMIT 10', ['6a0c687bbc5bca7ff731572e', '6a0c687bbc5bca7ff731572e']);
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 });
 
