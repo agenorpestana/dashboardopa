@@ -427,14 +427,17 @@ app.get('/api/media-proxy', async (req, res) => {
         if (metaJson.data && metaJson.data.length > 0) {
            const fileData = metaJson.data[0];
            console.log("Metadados do arquivo encontrados:", { url: fileData.url, url_s3: fileData.url_s3 });
-           if (fileData.url_s3) {
+           if (fileData.base64) {
+             const buffer = Buffer.from(fileData.base64, 'base64');
+             res.setHeader('Content-Type', fileData.tipo || 'application/octet-stream');
+             if (req.query.download === 'true') {
+                 res.setHeader('Content-Disposition', `attachment; filename="${fileId}.bin"`);
+             }
+             return res.send(buffer);
+           } else if (fileData.url_s3) {
              targetUrl = fileData.url_s3; // Usar proxy para baixar arquivo usando login do sistema
            } else if (fileData.url) {
              targetUrl = fileData.url.startsWith('http') ? fileData.url : `${mainDomainUrl}${fileData.url.startsWith('/') ? '' : '/'}${fileData.url}`;
-           } else if (fileData.base64) {
-             const buffer = Buffer.from(fileData.base64, 'base64');
-             res.setHeader('Content-Type', fileData.tipo || 'application/octet-stream');
-             return res.send(buffer);
            }
         }
       } catch (e) {

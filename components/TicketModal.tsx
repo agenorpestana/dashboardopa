@@ -291,22 +291,25 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, confi
                   let fileUrl = rawFileUrl || '';
                   if (fileUrl && !fileUrl.includes('s3.amazonaws') && !fileUrl.includes('s3') && fileUrl.startsWith('http')) {
                      fileUrl = `/api/media-proxy?url=${encodeURIComponent(fileUrl)}${proxyParams}`;
+                  } else if (fileUrl && fileUrl.startsWith('/') && fileIdParam) {
+                     // It's a relative path to Opa Suite, we must proxy it via its ID
+                     fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
+                  } else if (fileUrl && fileUrl.startsWith('/') && !fileIdParam) {
+                     // Relative path but no ID, try to construct full url
+                     let fullUrl = config.apiUrl ? `${config.apiUrl.replace(/\/api\/v1\/?$/, '')}${fileUrl}` : fileUrl;
+                     fileUrl = `/api/media-proxy?url=${encodeURIComponent(fullUrl)}${proxyParams}`;
                   } else if (!fileUrl && fileIdParam) {
                      fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
                   }
 
                   // External fallback URL for direct browser access
-                  let externalDirectFallback = rawFileUrl;
-                  if (externalDirectFallback && externalDirectFallback.match(/https?:\/\/[^\/]+\/([a-fA-F0-9]{24})$/)) {
-                     externalDirectFallback = externalDirectFallback.replace(/\/([a-fA-F0-9]{24})$/, '/arquivo/$1');
-                  }
-                  if (!externalDirectFallback && fileIdParam) {
-                     if (config && config.apiUrl) {
-                        let mainDomainUrl = config.apiUrl.trim().replace(/\/api\/v1\/?$/, '').replace(/\/$/, '') || '';
-                        externalDirectFallback = `${mainDomainUrl}/arquivo/${fileIdParam}`;
-                     } else {
-                        externalDirectFallback = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
-                     }
+                  let externalDirectFallback = '';
+                  if (rawFileUrl && rawFileUrl.startsWith('http') && !rawFileUrl.includes('/arquivo/')) {
+                      externalDirectFallback = rawFileUrl;
+                  } else if (fileIdParam) {
+                      externalDirectFallback = `/api/media-proxy?id=${fileIdParam}${proxyParams}&download=true`;
+                  } else {
+                      externalDirectFallback = fileUrl;
                   }
 
                   const isImage = ['imagem', 'image'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));
@@ -345,7 +348,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, confi
                                     <img src={fileUrl} alt="Anexo" className="max-w-full rounded-lg max-h-64 object-contain" onError={(e) => {
                                        if (e.currentTarget.src !== externalDirectFallback) e.currentTarget.src = externalDirectFallback; 
                                     }}/>
-                                    <span className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Se não carregar, clique para abrir (requer login Opa Suite em outra aba)</span>
+                                    <span className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Se não carregar, clique para abrir o anexo</span>
                                   </a>
                                 )}
                                 {isAudio && (
@@ -353,7 +356,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, confi
                                     <audio src={fileUrl} controls className="max-w-full h-10" onError={(e) => {
                                          if (e.currentTarget.src !== externalDirectFallback) e.currentTarget.src = externalDirectFallback; 
                                     }}/>
-                                    <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Dificuldades em ouvir? Abra o áudio diretamente (requer login Opa Suite em outra aba)</a>
+                                    <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Dificuldades em ouvir? Fazer download de arquivo original</a>
                                   </div>
                                 )}
                                 {isVideo && (
@@ -361,12 +364,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, confi
                                     <video src={fileUrl} controls className="max-w-full rounded-lg max-h-64" onError={(e) => {
                                         if (e.currentTarget.src !== externalDirectFallback) e.currentTarget.src = externalDirectFallback; 
                                     }}/>
-                                    <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Abrir vídeo diretamente (requer login Opa Suite em outra aba)</a>
+                                    <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="text-[10px] underline text-sky-400 opacity-70 hover:opacity-100">Fazer download do vídeo</a>
                                   </div>
                                 )}
                                 {(!isImage && !isAudio && !isVideo) && (
                                   <a href={externalDirectFallback} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sky-400 bg-sky-950 p-2 rounded hover:bg-sky-900 transition-colors text-xs font-medium">
-                                    📎 Ver Arquivo (Requer login Opa Suite em outra aba)
+                                    📎 Fazer Download do Arquivo
                                   </a>
                                 )}
                               </div>
