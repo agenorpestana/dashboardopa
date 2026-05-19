@@ -288,9 +288,15 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose }) => 
 
                   // External fallback URL for direct browser access
                   let externalDirectFallback = rawFileUrl;
+                  if (externalDirectFallback && externalDirectFallback.match(/https?:\/\/[^\/]+\/([a-fA-F0-9]{24})$/)) {
+                     externalDirectFallback = externalDirectFallback.replace(/\/([a-fA-F0-9]{24})$/, '/arquivo/$1');
+                  }
                   if (!externalDirectFallback && fileIdParam) {
                      // The login session is required to open the actual API url directly
-                     externalDirectFallback = `https://atendimento.itlfibra.com/arquivo/${fileIdParam}`;
+                     let domainMatches = window.location.origin; // default to current window domain if config unavailable
+                     // If we have token, we are operating with client-side config? Not easily available here.
+                     // But we can guess the main domain by substituting /api... or we just rely on fileId
+                     externalDirectFallback = `/api/media-proxy?id=${fileIdParam}`; // fallback to proxy if we don't have main domain
                   }
 
                   const isImage = ['imagem', 'image'].includes(String(msg.tipo).toLowerCase()) || (rawFileUrl && rawFileUrl.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i)) || (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i));

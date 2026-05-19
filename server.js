@@ -24,6 +24,8 @@ const port = process.env.PORT || 3000;
 
 // Vite middleware defined later
 
+app.get('/api/debug-env', (req, res) => res.json({ env: Object.keys(process.env).filter(k=>k.includes('DB') || k.includes('MYSQL') || k.includes('SQL')) }));
+
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
@@ -200,7 +202,10 @@ app.get('/api/settings', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
     res.json(rows[0] || {});
-  } catch (error) { res.status(500).json({ error: 'Erro ao buscar configurações' }); }
+  } catch (error) { 
+    console.error('Settings DB error:', error);
+    res.status(500).json({ error: 'Erro ao buscar configurações', details: String(error) }); 
+  }
 });
 
 app.post('/api/settings', async (req, res) => {
@@ -416,7 +421,7 @@ app.get('/api/media-proxy', async (req, res) => {
            if (fileData.url_s3) {
              targetUrl = fileData.url_s3; // Usar proxy para baixar arquivo usando login do sistema
            } else if (fileData.url) {
-             targetUrl = fileData.url;
+             targetUrl = fileData.url.startsWith('http') ? fileData.url : `${mainDomainUrl}${fileData.url.startsWith('/') ? '' : '/'}${fileData.url}`;
            } else if (fileData.base64) {
              const buffer = Buffer.from(fileData.base64, 'base64');
              res.setHeader('Content-Type', fileData.tipo || 'application/octet-stream');
@@ -472,6 +477,9 @@ app.get('/api/media-proxy', async (req, res) => {
             const json = await response.json();
             if (json.data && json.data.url) {
                 targetUrl = json.data.url;
+                if (!targetUrl.startsWith('http')) {
+                    targetUrl = `${mainDomainUrl}${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
+                }
                 response = await fetch(targetUrl, fetchOptions);
                 contentType = response.headers.get('content-type') || '';
             } else {
