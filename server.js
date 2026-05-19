@@ -445,45 +445,56 @@ app.get('/api/media-proxy', async (req, res) => {
       }
     }
 
-    // Attempt to download the file directly, and handle HTML login responses!
+    // Attempt to download the file directly
+    let targetUrls = [];
+    if (fileId) {
+        targetUrls.push(`${baseUrl}/arquivo/${fileId}`);
+        targetUrls.push(`${baseUrl}/arquivo/download/${fileId}`);
+        targetUrls.push(`${baseUrl}/arquivos/${fileId}`);
+        targetUrls.push(`${baseUrl}/mensagens/arquivo/${fileId}`);
+        targetUrls.push(`${mainDomainUrl}/arquivo/${fileId}`);
+        targetUrls.push(`${mainDomainUrl}/arquivo/download/${fileId}`);
+        targetUrls.push(`${mainDomainUrl}/arquivos/${fileId}`);
+        targetUrls.push(`${mainDomainUrl}/storage/arquivo/${fileId}`);
+        targetUrls.push(`${mainDomainUrl}/storage/arquivos/${fileId}`);
+    } else {
+        targetUrls.push(targetUrl);
+    }
+
     const fetchOptions = {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${finalToken}` }
     };
     
-    let cookies = [];
-    if (config.api_login && config.api_password) {
-        console.log("Using API Login to generate auth cookie:", config.api_login);
+    // ... we don't know which url is right
+
+    let response = null;
+    let contentType = '';
+    let finalValidUrl = '';
+
+    for (let url of targetUrls) {
+        console.log("Media Proxy Requesting URL:", url);
         try {
-           const loginRes = await fetch(`${mainDomainUrl}/auth/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: config.api_login, password: config.api_password })
-           });
-           const rawCookies = loginRes.headers.get('set-cookie');
-           if (rawCookies) {
-              cookies.push(rawCookies);
-              fetchOptions.headers['Cookie'] = rawCookies;
-           }
-           const loginData = await loginRes.json().catch(() => null);
-           if (loginData && loginData.token) {
-              fetchOptions.headers['Authorization'] = `Bearer ${loginData.token}`;
-           }
-        } catch(e) { console.error("Login fetch error:", e); }
+            response = await fetch(url, fetchOptions);
+            if (response.ok) {
+                contentType = response.headers.get('content-type') || '';
+                if (!contentType.includes('text/html')) {
+                     finalValidUrl = url;
+                     break; // Found a valid non-HTML response!
+                }
+            }
+        } catch(e) {
+            console.error("Error fetching", url, e.message);
+        }
     }
 
-    console.log("Media Proxy Requesting URL:", targetUrl);
+    if (!response || !response.ok || contentType.includes('text/html')) {
+        console.log("Nenhum endpoint retornou midia valida (recebendo HTML/falhas). Retornando 404.");
+        return res.status(404).send("File not found or unauthorized via proxy.");
+    }
     
-    let response = await fetch(targetUrl, fetchOptions);
-    
-    if (response.ok) {
-        let contentType = response.headers.get('content-type') || '';
-        
-        // If it's HTML, it means the server ignored the Bearer token or cookie and redirected to login page!
-        if (contentType.includes('text/html')) {
-            console.log("Recebendo HTML, redirecionando para a aba...");
-            return res.redirect(targetUrl);
-        }
+    targetUrl = finalValidUrl;
+
 
         if (contentType.includes('application/json')) {
             const json = await response.json();
@@ -574,6 +585,16 @@ app.get('/api/ticket-messages/:routeId', async (req, res) => {
     res.json({ success: true, data: result.data?.data || [] });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test-db', async (req, res) => {
+  try {
+    const pool = await getDbPool();
+    const [rows] = await pool.query('SELECT * FROM msgs WHERE id_arquivo = ? OR arquivo = ? LIMIT 10', ['6a0c687bbc5bca7ff731572e', '6a0c687bbc5bca7ff731572e']);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
