@@ -27,7 +27,9 @@ const App: React.FC = () => {
           const data = await res.json();
           setConfig({
             apiUrl: data.api_url || '',
-            apiToken: data.api_token || ''
+            apiToken: data.api_token || '',
+            apiLogin: data.api_login || '',
+            apiPassword: data.api_password || ''
           });
         }
       } catch (err) {

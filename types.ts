@@ -41,4 +41,6 @@ export interface DashboardStats {
 export interface AppConfig {
   apiUrl: string;
   apiToken: string;
+  apiLogin?: string;
+  apiPassword?: string;
 }

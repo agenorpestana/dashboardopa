@@ -17,6 +17,8 @@ export const Settings: React.FC<SettingsProps> = ({ config, onSave }) => {
 
   const [url, setUrl] = useState(config.apiUrl);
   const [token, setToken] = useState(config.apiToken);
+  const [apiLogin, setApiLogin] = useState(config.apiLogin || '');
+  const [apiPassword, setApiPassword] = useState(config.apiPassword || '');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -24,6 +26,8 @@ export const Settings: React.FC<SettingsProps> = ({ config, onSave }) => {
   useEffect(() => {
     setUrl(config.apiUrl);
     setToken(config.apiToken);
+    if (config.apiLogin) setApiLogin(config.apiLogin);
+    if (config.apiPassword) setApiPassword(config.apiPassword);
   }, [config]);
 
   const handleLoginSuccess = (user: string, pass: string) => {
@@ -45,13 +49,15 @@ export const Settings: React.FC<SettingsProps> = ({ config, onSave }) => {
           username: authCreds.username,
           password: authCreds.password,
           api_url: url,
-          api_token: token
+          api_token: token,
+          api_login: apiLogin,
+          api_password: apiPassword
         })
       });
 
       if (res.ok) {
         setMessage('Configurações salvas e aplicadas!');
-        onSave({ apiUrl: url, apiToken: token });
+        onSave({ apiUrl: url, apiToken: token, apiLogin, apiPassword });
       } else {
         setMessage('Erro ao salvar. Verifique suas credenciais.');
       }
@@ -134,6 +140,33 @@ export const Settings: React.FC<SettingsProps> = ({ config, onSave }) => {
               className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
             />
              <p className="text-xs text-slate-500 mt-2">Token Bearer gerado no painel administrativo do Opa Suite.</p>
+          </div>
+
+          <div className="pt-4 border-t border-slate-700">
+            <h3 className="text-lg font-medium text-white mb-4">Acesso de Proxy de Mídia (Opcional)</h3>
+            <p className="text-sm text-slate-400 mb-4">Para conseguir carregar anexos diretamente no dashboard sem abrir outra aba, insira um usuário e senha com permissões no Opa Suite que será utilizado pelo servidor para gerar uma sessão e baixar os arquivos.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Login (E-mail ou Usuário)</label>
+                <input
+                  type="text"
+                  value={apiLogin}
+                  onChange={(e) => setApiLogin(e.target.value)}
+                  placeholder="admin@provedor.com"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Senha</label>
+                <input
+                  type="password"
+                  value={apiPassword}
+                  onChange={(e) => setApiPassword(e.target.value)}
+                  placeholder="******"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="bg-sky-900/20 border border-sky-900/50 rounded-lg p-4 flex gap-3">

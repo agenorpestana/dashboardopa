@@ -41,6 +41,15 @@ async function initDB() {
     const connection = await pool.getConnection();
     await connection.query(`CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(255) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
     await connection.query(`CREATE TABLE IF NOT EXISTS settings (id INT AUTO_INCREMENT PRIMARY KEY, api_url VARCHAR(255), api_token TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+    
+    // Auto-migrate columns
+    try {
+      await connection.query('ALTER TABLE settings ADD COLUMN api_login VARCHAR(255)');
+    } catch(e) { }
+    try {
+      await connection.query('ALTER TABLE settings ADD COLUMN api_password VARCHAR(255)');
+    } catch(e) { }
+
     const [rows] = await connection.query('SELECT * FROM users WHERE username = ?', ['suporte']);
     if (rows.length === 0) {
       const salt = await bcrypt.genSalt(10);
@@ -189,20 +198,20 @@ app.post('/api/login', async (req, res) => {
 
 app.get('/api/settings', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+    const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
     res.json(rows[0] || {});
   } catch (error) { res.status(500).json({ error: 'Erro ao buscar configurações' }); }
 });
 
 app.post('/api/settings', async (req, res) => {
-  const { username, password, api_url, api_token } = req.body;
+  const { username, password, api_url, api_token, api_login, api_password } = req.body;
   try {
     const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
     const user = userRows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(403).json({ success: false });
     const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
-    if (settingRows.length > 0) await pool.query('UPDATE settings SET api_url = ?, api_token = ? WHERE id = ?', [api_url, api_token, settingRows[0].id]);
-    else await pool.query('INSERT INTO settings (api_url, api_token) VALUES (?, ?)', [api_url, api_token]);
+    if (settingRows.length > 0) await pool.query('UPDATE settings SET api_url = ?, api_token = ?, api_login = ?, api_password = ? WHERE id = ?', [api_url, api_token, api_login, api_password, settingRows[0].id]);
+    else await pool.query('INSERT INTO settings (api_url, api_token, api_login, api_password) VALUES (?, ?, ?, ?)', [api_url, api_token, api_login, api_password]);
     res.json({ success: true });
   } catch (error) { res.status(500).json({ success: false }); }
 });
@@ -365,25 +374,29 @@ app.get('/api/media-proxy', async (req, res) => {
     let config = {};
     if (!token) {
         try {
-            const [rows] = await pool.query('SELECT api_url, api_token FROM settings ORDER BY id DESC LIMIT 1');
+            const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
             config = rows[0] || {};
             token = config.api_token;
         } catch(e) {
             console.error("DB skip", e.message);
         }
+    } else {
+        try {
+            const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
+            config = rows[0] || {};
+        } catch(e) { }
     }
     
     const finalToken = token || '';
     let baseUrl = baseUrlParam || config.api_url || '';
-    baseUrl = baseUrl.trim().replace(/\/$/, '');
+    let mainDomainUrl = baseUrl.trim().replace(/\/api\/v1\/?$/, '').replace(/\/$/, '') || '';
+    baseUrl = mainDomainUrl;
     if (baseUrl && !baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     
     let targetUrl = mediaUrl;
     
     // Tentativa 1: Fazer POST para buscar metadados do arquivo se for um ID
     if (fileId) {
-      let baseUrl = config?.api_url?.trim().replace(/\/$/, '') || '';
-      if (!baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
       targetUrl = `${baseUrl}/arquivo/${fileId}`; // Mantém o GET normal como fallback
 
       try {
@@ -391,7 +404,7 @@ app.get('/api/media-proxy', async (req, res) => {
         const metaRes = await fetch(`${baseUrl}/arquivo`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${finalToken}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ filter: { _id: fileId } })
@@ -401,7 +414,7 @@ app.get('/api/media-proxy', async (req, res) => {
            const fileData = metaJson.data[0];
            console.log("Metadados do arquivo encontrados:", { url: fileData.url, url_s3: fileData.url_s3 });
            if (fileData.url_s3) {
-             targetUrl = fileData.url_s3;
+             targetUrl = fileData.url_s3; // Usar proxy para baixar arquivo usando login do sistema
            } else if (fileData.url) {
              targetUrl = fileData.url;
            } else if (fileData.base64) {
@@ -415,13 +428,83 @@ app.get('/api/media-proxy', async (req, res) => {
       }
     }
 
-    console.log("Media Proxy Redirecting to:", targetUrl);
+    // Attempt to download the file directly, and handle HTML login responses!
+    const fetchOptions = {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${finalToken}` }
+    };
     
-    // As the files are protected by the user's session cookies on the Opa Suite domain,
-    // we cannot proxy them via a server-side fetch with a Bearer token (which returns an HTML login page).
-    // Instead, we redirect the browser to the actual URL so it uses the S3 public link 
-    // or native cookies for authentication.
-    return res.redirect(targetUrl);
+    let cookies = [];
+    if (config.api_login && config.api_password) {
+        console.log("Using API Login to generate auth cookie:", config.api_login);
+        try {
+           const loginRes = await fetch(`${mainDomainUrl}/auth/login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: config.api_login, password: config.api_password })
+           });
+           const rawCookies = loginRes.headers.get('set-cookie');
+           if (rawCookies) {
+              cookies.push(rawCookies);
+              fetchOptions.headers['Cookie'] = rawCookies;
+           }
+           const loginData = await loginRes.json().catch(() => null);
+           if (loginData && loginData.token) {
+              fetchOptions.headers['Authorization'] = `Bearer ${loginData.token}`;
+           }
+        } catch(e) { console.error("Login fetch error:", e); }
+    }
+
+    console.log("Media Proxy Requesting URL:", targetUrl);
+    
+    let response = await fetch(targetUrl, fetchOptions);
+    
+    if (response.ok) {
+        let contentType = response.headers.get('content-type') || '';
+        
+        // If it's HTML, it means the server ignored the Bearer token or cookie and redirected to login page!
+        if (contentType.includes('text/html')) {
+            console.log("Recebendo HTML, redirecionando para a aba...");
+            return res.redirect(targetUrl);
+        }
+
+        if (contentType.includes('application/json')) {
+            const json = await response.json();
+            if (json.data && json.data.url) {
+                targetUrl = json.data.url;
+                response = await fetch(targetUrl, fetchOptions);
+                contentType = response.headers.get('content-type') || '';
+            } else {
+                return res.status(500).json(json);
+            }
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const total = buffer.length;
+        
+        if (req.headers.range) {
+            const parts = req.headers.range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
+            const chunksize = (end - start) + 1;
+            
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Content-Length', chunksize);
+            if(contentType) res.setHeader('Content-Type', contentType);
+            return res.send(buffer.slice(start, end + 1));
+        }
+
+        res.setHeader('Content-Length', total);
+        res.setHeader('Accept-Ranges', 'bytes');
+        if(contentType) res.setHeader('Content-Type', contentType);
+        return res.send(buffer);
+    } else {
+       console.log("Fetch failed, redirecting to targetUrl...");
+       return res.redirect(targetUrl);
+    }
   } catch (error) {
     console.error('Media proxy error:', error);
     res.status(500).json({ error: String(error), stack: error?.stack });
