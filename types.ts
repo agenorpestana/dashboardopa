@@ -43,4 +43,7 @@ export interface AppConfig {
   apiToken: string;
   apiLogin?: string;
   apiPassword?: string;
+  mongo_url?: string;
+  mongo_enabled?: boolean | number;
+  local_files_path?: string;
 }

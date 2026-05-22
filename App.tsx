@@ -29,7 +29,10 @@ const App: React.FC = () => {
             apiUrl: data.api_url || '',
             apiToken: data.api_token || '',
             apiLogin: data.api_login || '',
-            apiPassword: data.api_password || ''
+            apiPassword: data.api_password || '',
+            mongo_url: data.mongo_url || '',
+            mongo_enabled: data.mongo_enabled === 1 || data.mongo_enabled === true || data.mongo_enabled === 'true',
+            local_files_path: data.local_files_path || ''
           });
         }
       } catch (err) {
