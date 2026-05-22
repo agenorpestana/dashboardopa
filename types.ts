@@ -19,7 +19,7 @@ export interface Ticket {
   departmentId?: string; // ID interno do Opa Suite para diagnósticos
   createdAt?: string;
   closedAt?: string;
-  isBot?: boolean; // Flag to check if it was handled/finished by a robot.
+  isBot?: boolean; // Flag to check if it was handled/finished by a robot
 }
 
 export interface Attendant {
@@ -43,7 +43,4 @@ export interface AppConfig {
   apiToken: string;
   apiLogin?: string;
   apiPassword?: string;
-  mongo_url?: string;
-  mongo_enabled?: boolean | number;
-  local_files_path?: string;
 }

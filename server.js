@@ -10,57 +10,9 @@ import fs from 'fs';
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
-import { MongoClient, ObjectId } from 'mongodb';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-// Fallback configuration file path (ensures local setup works even when MySQL is offline)
-const FALLBACK_FILE = join(__dirname, 'settings-fallback.json');
-
-async function getFallbackConfig() {
-  try {
-    if (fs.existsSync(FALLBACK_FILE)) {
-      const data = fs.readFileSync(FALLBACK_FILE, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    console.error("Erro ao ler config fallback:", e.message);
-  }
-  return {};
-}
-
-async function writeFallbackConfig(config) {
-  try {
-    fs.writeFileSync(FALLBACK_FILE, JSON.stringify(config, null, 2), 'utf8');
-    return true;
-  } catch (e) {
-    console.error("Erro ao escrever config fallback:", e.message);
-  }
-  return false;
-}
-
-// Caching Mongo Connection Pool
-let mongoClient = null;
-
-async function getMongoClient(mongoUrl) {
-  if (mongoClient) return mongoClient;
-  if (!mongoUrl) return null;
-  try {
-    console.log("Conectando ao MongoDB do Opa Suite...");
-    mongoClient = new MongoClient(mongoUrl, {
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000
-    });
-    await mongoClient.connect();
-    console.log("MongoDB do Opa Suite conectado com sucesso!");
-    return mongoClient;
-  } catch (error) {
-    console.error("Erro ao conectar ao MongoDB do Opa Suite:", error.message);
-    mongoClient = null;
-    return null;
-  }
-}
 
 dotenv.config();
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -98,15 +50,6 @@ async function initDB() {
     } catch(e) { }
     try {
       await connection.query('ALTER TABLE settings ADD COLUMN api_password VARCHAR(255)');
-    } catch(e) { }
-    try {
-      await connection.query('ALTER TABLE settings ADD COLUMN mongo_url TEXT');
-    } catch(e) { }
-    try {
-      await connection.query('ALTER TABLE settings ADD COLUMN mongo_enabled TINYINT DEFAULT 0');
-    } catch(e) { }
-    try {
-      await connection.query('ALTER TABLE settings ADD COLUMN local_files_path VARCHAR(255)');
     } catch(e) { }
 
     const [rows] = await connection.query('SELECT * FROM users WHERE username = ?', ['suporte']);
@@ -248,34 +191,21 @@ async function fetchAllWithPagination(baseUrl, path, token, filter, maxRecords =
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    let authSuccess = false;
-    try {
-      const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-      const user = rows[0];
-      if (user && (await bcrypt.compare(password, user.password_hash))) {
-        authSuccess = true;
-      }
-    } catch (mysqlErr) {
-      console.warn("MySQL login failed, checking default static fallback:", mysqlErr.message);
-      if (username === 'suporte' && password === '200616') {
-        authSuccess = true;
-      }
-    }
-
-    if (!authSuccess) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
-    res.json({ success: true, username });
-  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+    const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+    const user = rows[0];
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
+    res.json({ success: true, username: user.username });
+  } catch (error) { res.status(500).json({ success: false }); }
 });
 
 let configCache = null;
 
 async function getConfig() {
   try {
-    const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password, mongo_url, mongo_enabled, local_files_path FROM settings ORDER BY id DESC LIMIT 1');
+    const [rows] = await pool.query('SELECT api_url, api_token, api_login, api_password FROM settings ORDER BY id DESC LIMIT 1');
     configCache = rows[0] || {};
   } catch(e) {
-    console.warn("MySQL settings retrieval failed, using fallback local settings:", e.message);
-    configCache = await getFallbackConfig();
+    if(!configCache) throw e;
   }
   return configCache;
 }
@@ -291,58 +221,16 @@ app.get('/api/settings', async (req, res) => {
 });
 
 app.post('/api/settings', async (req, res) => {
-  const { username, password, api_url, api_token, api_login, api_password, mongo_url, mongo_enabled, local_files_path } = req.body;
+  const { username, password, api_url, api_token, api_login, api_password } = req.body;
   try {
-    let authenticated = false;
-    try {
-      const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-      const user = userRows[0];
-      if (user && (await bcrypt.compare(password, user.password_hash))) {
-        authenticated = true;
-      }
-    } catch (mysqlErr) {
-      console.warn("MySQL settings auth failed, checking fallback default:", mysqlErr.message);
-      if (username === 'suporte' && password === '200616') {
-        authenticated = true;
-      }
-    }
-
-    if (!authenticated) return res.status(403).json({ success: false, error: 'Credenciais inválidas' });
-
-    const mongoEnabledVal = mongo_enabled === true || mongo_enabled === 1 || mongo_enabled === 'true' ? 1 : 0;
-    const newConfig = {
-      api_url,
-      api_token,
-      api_login,
-      api_password,
-      mongo_url,
-      mongo_enabled: mongoEnabledVal,
-      local_files_path
-    };
-
-    try {
-      const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
-      if (settingRows.length > 0) {
-        await pool.query('UPDATE settings SET api_url = ?, api_token = ?, api_login = ?, api_password = ?, mongo_url = ?, mongo_enabled = ?, local_files_path = ? WHERE id = ?', [
-          api_url, api_token, api_login, api_password, mongo_url, mongoEnabledVal, local_files_path, settingRows[0].id
-        ]);
-      } else {
-        await pool.query('INSERT INTO settings (api_url, api_token, api_login, api_password, mongo_url, mongo_enabled, local_files_path) VALUES (?, ?, ?, ?, ?, ?, ?)', [
-          api_url, api_token, api_login, api_password, mongo_url, mongoEnabledVal, local_files_path
-        ]);
-      }
-    } catch (mysqlErr) {
-      console.warn("MySQL saving failed, saving exclusively to local fallback file:", mysqlErr.message);
-    }
-
-    // Always keep settings sync in relative file structure
-    await writeFallbackConfig(newConfig);
-
+    const [userRows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+    const user = userRows[0];
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(403).json({ success: false });
+    const [settingRows] = await pool.query('SELECT id FROM settings LIMIT 1');
+    if (settingRows.length > 0) await pool.query('UPDATE settings SET api_url = ?, api_token = ?, api_login = ?, api_password = ? WHERE id = ?', [api_url, api_token, api_login, api_password, settingRows[0].id]);
+    else await pool.query('INSERT INTO settings (api_url, api_token, api_login, api_password) VALUES (?, ?, ?, ?)', [api_url, api_token, api_login, api_password]);
     res.json({ success: true });
-  } catch (error) { 
-    console.error("Save settings failed:", error);
-    res.status(500).json({ success: false, error: error.message }); 
-  }
+  } catch (error) { res.status(500).json({ success: false }); }
 });
 
 app.get('/api/debug-dump', async (req, res) => {
@@ -521,54 +409,8 @@ app.get('/api/media-proxy', async (req, res) => {
     
     let targetUrl = mediaUrl;
     
-    // Tentativa MongoDB Fallback: Buscar no banco de dados MongoDB do Opa Suite se configurado e habilitado
-    if (fileId && (config.mongo_enabled === 1 || config.mongo_enabled === true || config.mongo_enabled === 'true') && config.mongo_url) {
-      try {
-        const client = await getMongoClient(config.mongo_url);
-        if (client) {
-          console.log(`Buscando arquivo ${fileId} na coleção 'arquivos' do MongoDB...`);
-          const dbName = config.mongo_url.split('/').pop()?.split('?')[0] || 'opasuite';
-          const db = client.db(dbName);
-          const arquivosColl = db.collection('arquivos');
-          const fileDoc = await arquivosColl.findOne({ _id: new ObjectId(fileId) });
-          
-          if (fileDoc) {
-            console.log("Metadados recuperados do MongoDB com sucesso:", { local: fileDoc.local, tipo: fileDoc.tipo });
-            
-            if (fileDoc.local) {
-               // 1. Stream direto do disco se a pasta com arquivos existir no mesmo host
-               const localFilesBase = config.local_files_path || '';
-               if (localFilesBase) {
-                 const fullDiskPath = join(localFilesBase, fileDoc.local);
-                 if (fs.existsSync(fullDiskPath)) {
-                   console.log(`Carregando e transmitindo arquivo diretamente do disco local: ${fullDiskPath}`);
-                   const buffer = fs.readFileSync(fullDiskPath);
-                   res.setHeader('Content-Type', fileDoc.tipo || 'application/octet-stream');
-                   if (req.query.download === 'true') {
-                       res.setHeader('Content-Disposition', `attachment; filename="${fileDoc.nome || fileId}"`);
-                   }
-                   return res.end(buffer);
-                 } else {
-                   console.warn(`Arquivo indicado pelo MongoDB não existe no caminho local: ${fullDiskPath}`);
-                 }
-               }
-               
-               // 2. URL Fallback construída a partir do caminho retornado pelo MongoDB
-               const fullHttpUrl = `${mainDomainUrl}/${fileDoc.local.startsWith('/') ? fileDoc.local.slice(1) : fileDoc.local}`;
-               console.log(`URL do arquivo construída com sucesso via MongoDB: ${fullHttpUrl}`);
-               targetUrl = fullHttpUrl;
-            }
-          } else {
-             console.log(`Documento de ID ${fileId} não encontrado na coleção 'arquivos' do MongoDB.`);
-          }
-        }
-      } catch (mongoQueryErr) {
-        console.error("Erro ao rodar query ou carregar arquivo via MongoDB:", mongoQueryErr.message);
-      }
-    }
-
     // Tentativa 1: Fazer POST para buscar metadados do arquivo se for um ID
-    if (fileId && !targetUrl) {
+    if (fileId) {
       targetUrl = `${baseUrl}/arquivo/${fileId}`; // Mantém o GET normal como fallback
 
       try {
