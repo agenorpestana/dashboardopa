@@ -288,23 +288,72 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, confi
                       proxyParams += `&token=${encodeURIComponent(config.apiToken)}`;
                   }
 
-                  let fileUrl = rawFileUrl || '';
-                  if (fileUrl && !fileUrl.includes('s3.amazonaws') && !fileUrl.includes('s3') && fileUrl.startsWith('http')) {
-                     fileUrl = `/api/media-proxy?url=${encodeURIComponent(fileUrl)}${proxyParams}`;
-                  } else if (fileUrl && fileUrl.startsWith('/') && fileIdParam) {
-                     // It's a relative path to Opa Suite, we must proxy it via its ID
-                     fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
-                  } else if (fileUrl && fileUrl.startsWith('/') && !fileIdParam) {
-                     // Relative path but no ID, try to construct full url
-                     let fullUrl = config.apiUrl ? `${config.apiUrl.replace(/\/api\/v1\/?$/, '')}${fileUrl}` : fileUrl;
-                     fileUrl = `/api/media-proxy?url=${encodeURIComponent(fullUrl)}${proxyParams}`;
-                  } else if (!fileUrl && fileIdParam) {
-                     fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
+                  let filename = '';
+                  if (typeof msg.mensagem === 'string' && msg.mensagem.match(/\.[a-zA-Z0-9]{2,4}$/)) {
+                    filename = msg.mensagem;
+                  } else if (msg.arquivo) {
+                    if (typeof msg.arquivo === 'object' && msg.arquivo.nome) {
+                      filename = msg.arquivo.nome;
+                    } else if (typeof msg.arquivo === 'string' && msg.arquivo.match(/\.[a-zA-Z0-9]{2,4}$/)) {
+                      filename = msg.arquivo;
+                    }
+                  } else if (msg.nome_arquivo) {
+                    filename = msg.nome_arquivo;
+                  } else if (msg.anexo?.nome) {
+                    filename = msg.anexo.nome;
+                  }
+
+                  if (!filename && rawFileUrl) {
+                    const match = rawFileUrl.match(/\/([^\/]+\.[a-zA-Z0-9]{2,4})($|\?)/);
+                    if (match) {
+                      filename = match[1];
+                    }
+                  }
+
+                  let reconstructedPath = '';
+                  if (filename) {
+                    filename = filename.replace(/^.*[\\\/]/, ''); // trailing filename only
+                    const dateStr = msg.data || msg.createdAt || msg.created_at;
+                    if (dateStr) {
+                      try {
+                        const d = new Date(String(dateStr).replace(' ', 'T'));
+                        if (!isNaN(d.getTime())) {
+                          const yyyy = d.getFullYear();
+                          const mm = String(d.getMonth() + 1).padStart(2, '0');
+                          const dd = String(d.getDate()).padStart(2, '0');
+                          reconstructedPath = `arquivos/${yyyy}-${mm}/${dd}/${filename}`;
+                        }
+                      } catch (e) {
+                         console.error("Error parsing date on client:", e);
+                      }
+                    }
+                  }
+
+                  let fileUrl = '';
+                  if (reconstructedPath) {
+                     fileUrl = `/api/media-proxy?path=${encodeURIComponent(reconstructedPath)}${proxyParams}`;
+                     if (fileIdParam) {
+                       fileUrl += `&id=${fileIdParam}`;
+                     }
+                  } else {
+                    let rawFileUrlVal = rawFileUrl || '';
+                    if (rawFileUrlVal && !rawFileUrlVal.includes('s3.amazonaws') && !rawFileUrlVal.includes('s3') && rawFileUrlVal.startsWith('http')) {
+                       fileUrl = `/api/media-proxy?url=${encodeURIComponent(rawFileUrlVal)}${proxyParams}`;
+                    } else if (rawFileUrlVal && rawFileUrlVal.startsWith('/') && fileIdParam) {
+                       fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
+                    } else if (rawFileUrlVal && rawFileUrlVal.startsWith('/') && !fileIdParam) {
+                       let fullUrl = config.apiUrl ? `${config.apiUrl.replace(/\/api\/v1\/?$/, '')}${rawFileUrlVal}` : rawFileUrlVal;
+                       fileUrl = `/api/media-proxy?url=${encodeURIComponent(fullUrl)}${proxyParams}`;
+                    } else if (!rawFileUrlVal && fileIdParam) {
+                       fileUrl = `/api/media-proxy?id=${fileIdParam}${proxyParams}`;
+                    }
                   }
 
                   // External fallback URL for direct browser access
                   let externalDirectFallback = '';
-                  if (rawFileUrl && rawFileUrl.startsWith('http') && !rawFileUrl.includes('/arquivo/')) {
+                  if (reconstructedPath) {
+                      externalDirectFallback = `/api/media-proxy?path=${encodeURIComponent(reconstructedPath)}${proxyParams}&download=true`;
+                  } else if (rawFileUrl && rawFileUrl.startsWith('http') && !rawFileUrl.includes('/arquivo/')) {
                       externalDirectFallback = rawFileUrl;
                   } else if (fileIdParam) {
                       externalDirectFallback = `/api/media-proxy?id=${fileIdParam}${proxyParams}&download=true`;

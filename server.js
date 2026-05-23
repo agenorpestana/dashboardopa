@@ -489,6 +489,7 @@ app.get('/api/media-proxy', async (req, res) => {
     let fileId = req.query.id;
     let token = req.query.token;
     let baseUrlParam = req.query.baseUrl;
+    const filePath = req.query.path;
     
     // Extrait MongoDB ObjectId from URL to fetch metadata via API 
     // avoiding the HTML login page on web endpoints
@@ -497,7 +498,7 @@ app.get('/api/media-proxy', async (req, res) => {
        if (match) fileId = match[0];
     }
     
-    if (!mediaUrl && !fileId) return res.status(400).send('URL or ID missing');
+    if (!mediaUrl && !fileId && !filePath) return res.status(400).send('URL, ID or path missing');
 
     let config = {};
     if (!token) {
@@ -520,6 +521,44 @@ app.get('/api/media-proxy', async (req, res) => {
     if (baseUrl && !baseUrl.includes('/api/v1')) baseUrl += '/api/v1';
     
     let targetUrl = mediaUrl;
+
+    // Se o filePath for fornecido, tentamos carregar diretamente do disco se configurado localmente
+    if (filePath) {
+      const localFilesBase = config.local_files_path || '';
+      if (localFilesBase) {
+        const checkPaths = [
+          join(localFilesBase, filePath),
+          join(localFilesBase, 'public', filePath),
+          join(localFilesBase, 'app', filePath),
+          join(localFilesBase, filePath.replace(/^arquivos\//, ''))
+        ];
+        for (const fullDiskPath of checkPaths) {
+          if (fs.existsSync(fullDiskPath)) {
+            console.log(`Carregando e transmitindo arquivo diretamente de local_files_path: ${fullDiskPath}`);
+            try {
+              const buffer = fs.readFileSync(fullDiskPath);
+              let inferredType = 'application/octet-stream';
+              if (filePath.toLowerCase().endsWith('.mp3')) inferredType = 'audio/mpeg';
+              else if (filePath.toLowerCase().endsWith('.ogg')) inferredType = 'audio/ogg';
+              else if (filePath.toLowerCase().endsWith('.wav')) inferredType = 'audio/wav';
+              else if (filePath.toLowerCase().endsWith('.png')) inferredType = 'image/png';
+              else if (filePath.toLowerCase().endsWith('.jpg') || filePath.toLowerCase().endsWith('.jpeg')) inferredType = 'image/jpeg';
+              else if (filePath.toLowerCase().endsWith('.gif')) inferredType = 'image/gif';
+              else if (filePath.toLowerCase().endsWith('.pdf')) inferredType = 'application/pdf';
+              
+              res.setHeader('Content-Type', inferredType);
+              if (req.query.download === 'true') {
+                  const baseName = filePath.split('/').pop();
+                  res.setHeader('Content-Disposition', `attachment; filename="${baseName}"`);
+              }
+              return res.end(buffer);
+            } catch (diskErr) {
+              console.error("Erro ao ler do disco local:", diskErr.message);
+            }
+          }
+        }
+      }
+    }
     
     // Tentativa MongoDB Fallback: Buscar no banco de dados MongoDB do Opa Suite se configurado e habilitado
     if (fileId && (config.mongo_enabled === 1 || config.mongo_enabled === true || config.mongo_enabled === 'true') && config.mongo_url) {
@@ -605,6 +644,10 @@ app.get('/api/media-proxy', async (req, res) => {
 
     // Attempt to download the file directly
     let targetUrls = [];
+    if (filePath && mainDomainUrl) {
+        const cleanPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
+        targetUrls.push(`${mainDomainUrl}/${cleanPath}`);
+    }
     if (targetUrl) {
         targetUrls.push(targetUrl);
     }
