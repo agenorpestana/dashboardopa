@@ -561,15 +561,56 @@ app.get('/api/media-proxy', async (req, res) => {
     }
     
     // Tentativa MongoDB Fallback: Buscar no banco de dados MongoDB do Opa Suite se configurado e habilitado
-    if (fileId && (config.mongo_enabled === 1 || config.mongo_enabled === true || config.mongo_enabled === 'true') && config.mongo_url) {
+    if ((fileId || filePath) && (config.mongo_enabled === 1 || config.mongo_enabled === true || config.mongo_enabled === 'true') && config.mongo_url) {
       try {
         const client = await getMongoClient(config.mongo_url);
         if (client) {
-          console.log(`Buscando arquivo ${fileId} na coleção 'arquivos' do MongoDB...`);
+          console.log(`Buscando arquivo (ID: ${fileId}, Path: ${filePath}) na coleção 'arquivos' do MongoDB...`);
           const dbName = config.mongo_url.split('/').pop()?.split('?')[0] || 'opasuite';
           const db = client.db(dbName);
           const arquivosColl = db.collection('arquivos');
-          const fileDoc = await arquivosColl.findOne({ _id: new ObjectId(fileId) });
+          
+          let fileDoc = null;
+          
+          if (fileId) {
+            let searchObj = {};
+            let isValidObjectId = false;
+            try {
+              if (fileId.match(/^[0-9a-fA-F]{24}$/)) {
+                searchObj = { _id: new ObjectId(fileId) };
+                isValidObjectId = true;
+              } else {
+                searchObj = {
+                  $or: [
+                    { _id: fileId },
+                    { id: fileId },
+                    { nome: fileId },
+                    { nome_interno: fileId },
+                    { local: new RegExp(fileId, 'i') }
+                  ]
+                };
+              }
+            } catch (e) {
+              searchObj = { nome: fileId };
+            }
+
+            fileDoc = await arquivosColl.findOne(searchObj);
+            
+            if (!fileDoc && isValidObjectId) {
+              fileDoc = await arquivosColl.findOne({ _id: fileId });
+            }
+          }
+
+          if (!fileDoc && filePath) {
+            fileDoc = await arquivosColl.findOne({
+              $or: [
+                { local: filePath },
+                { local: filePath.replace(/^arquivos\//, '') },
+                { local: '/' + filePath },
+                { nome: filePath.split('/').pop() }
+              ]
+            });
+          }
           
           if (fileDoc) {
             console.log("Metadados recuperados do MongoDB com sucesso:", { local: fileDoc.local, tipo: fileDoc.tipo });
@@ -578,18 +619,25 @@ app.get('/api/media-proxy', async (req, res) => {
                // 1. Stream direto do disco se a pasta com arquivos existir no mesmo host
                const localFilesBase = config.local_files_path || '';
                if (localFilesBase) {
-                 const fullDiskPath = join(localFilesBase, fileDoc.local);
-                 if (fs.existsSync(fullDiskPath)) {
-                   console.log(`Carregando e transmitindo arquivo diretamente do disco local: ${fullDiskPath}`);
-                   const buffer = fs.readFileSync(fullDiskPath);
-                   res.setHeader('Content-Type', fileDoc.tipo || 'application/octet-stream');
-                   if (req.query.download === 'true') {
-                       res.setHeader('Content-Disposition', `attachment; filename="${fileDoc.nome || fileId}"`);
+                 const checkPaths = [
+                   join(localFilesBase, fileDoc.local),
+                   join(localFilesBase, 'arquivos', fileDoc.local.replace(/^arquivos\//, '')),
+                   join(localFilesBase, fileDoc.local.replace(/^arquivos\//, '')),
+                   join(localFilesBase, 'public', fileDoc.local),
+                   join(localFilesBase, 'app', fileDoc.local)
+                 ];
+                 for (const fullDiskPath of checkPaths) {
+                   if (fs.existsSync(fullDiskPath)) {
+                     console.log(`Carregando e transmitindo arquivo diretamente do disco local: ${fullDiskPath}`);
+                     const buffer = fs.readFileSync(fullDiskPath);
+                     res.setHeader('Content-Type', fileDoc.tipo || 'application/octet-stream');
+                     if (req.query.download === 'true') {
+                         res.setHeader('Content-Disposition', `attachment; filename="${fileDoc.nome || fileId || 'arquivo'}"`);
+                     }
+                     return res.end(buffer);
                    }
-                   return res.end(buffer);
-                 } else {
-                   console.warn(`Arquivo indicado pelo MongoDB não existe no caminho local: ${fullDiskPath}`);
                  }
+                 console.warn(`Arquivo indicado pelo MongoDB não existe nos caminhos locais tentados.`);
                }
                
                // 2. URL Fallback construída a partir do caminho retornado pelo MongoDB
@@ -598,7 +646,7 @@ app.get('/api/media-proxy', async (req, res) => {
                targetUrl = fullHttpUrl;
             }
           } else {
-             console.log(`Documento de ID ${fileId} não encontrado na coleção 'arquivos' do MongoDB.`);
+             console.log(`Nenhum documento encontrado para ID: ${fileId} ou Path: ${filePath} na coleção 'arquivos' do MongoDB.`);
           }
         }
       } catch (mongoQueryErr) {

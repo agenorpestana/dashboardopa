@@ -311,7 +311,23 @@ export const TicketModal: React.FC<TicketModalProps> = ({ ticket, onClose, confi
                   }
 
                   let reconstructedPath = '';
-                  if (filename) {
+
+                  // Tentar extrair diretamente se houver "arquivos/" em qualquer campo
+                  let detectedPath = '';
+                  if (typeof msg.mensagem === 'string' && msg.mensagem.includes('arquivos/')) {
+                     const idx = msg.mensagem.indexOf('arquivos/');
+                     detectedPath = msg.mensagem.substring(idx);
+                  } else if (typeof msg.arquivo === 'string' && msg.arquivo.includes('arquivos/')) {
+                     const idx = msg.arquivo.indexOf('arquivos/');
+                     detectedPath = msg.arquivo.substring(idx);
+                  } else if (rawFileUrl && rawFileUrl.includes('arquivos/')) {
+                     const idx = rawFileUrl.indexOf('arquivos/');
+                     detectedPath = rawFileUrl.substring(idx);
+                  }
+
+                  if (detectedPath) {
+                     reconstructedPath = detectedPath;
+                  } else if (filename) {
                     filename = filename.replace(/^.*[\\\/]/, ''); // trailing filename only
                     const dateStr = msg.data || msg.createdAt || msg.created_at;
                     if (dateStr) {
