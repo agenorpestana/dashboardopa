@@ -165,37 +165,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
     console.groupEnd();
   }, [departments, periods, stats.detailedLogs, stats.departmentSummary, stats.finished]);
 
-  const last6MonthsData = useMemo(() => {
-    const data = [];
+  const last3MonthsData = useMemo(() => {
     const now = new Date();
-    
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const month = d.getMonth();
-      const year = d.getFullYear();
-      const monthLabel = `${String(month + 1).padStart(2, '0')}/${year}`;
-      
-      const monthTickets = tickets.filter(t => {
-        const tDateStr = t.createdAt || t.closedAt;
-        if (!tDateStr) return false;
-        const tDate = new Date(String(tDateStr).replace(' ', 'T'));
-        return tDate.getMonth() === month && tDate.getFullYear() === year;
-      });
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
 
-      const checkIsBot = (t: Ticket) => t.isBot || t.attendantName === 'Víctor' || t.attendantName?.toLowerCase().includes('bot');
-      
-      const bot = monthTickets.filter(checkIsBot).length;
-      const total = monthTickets.length;
-      const humano = total - bot;
-      
-      data.push({
-        name: monthLabel,
-        bot,
-        humano,
-        total
+    const checkIsBot = (t: Ticket) => t.isBot || t.attendantName === 'Víctor' || t.attendantName?.toLowerCase().includes('bot');
+    
+    // We want the last 3 completed/past months (excluding the current month)
+    const targetMonths = [];
+    for (let i = 3; i >= 1; i--) {
+      const d = new Date(currentYear, currentMonth - i, 1);
+      targetMonths.push({
+        month: d.getMonth(),
+        year: d.getFullYear(),
+        label: `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
       });
     }
-    return data;
+
+    // Initialize counts
+    const monthCounts = targetMonths.map(tm => ({
+      name: tm.label,
+      bot: 0,
+      humano: 0,
+      total: 0,
+      month: tm.month,
+      year: tm.year
+    }));
+
+    // Process tickets in a single-pass loop for optimal performance
+    tickets.forEach(t => {
+      const tDateStr = t.createdAt || t.closedAt;
+      if (!tDateStr) return;
+      const tDate = new Date(String(tDateStr).replace(' ', 'T'));
+      const tMonth = tDate.getMonth();
+      const tYear = tDate.getFullYear();
+
+      const bucket = monthCounts.find(mc => mc.month === tMonth && mc.year === tYear);
+      if (bucket) {
+        const isBot = checkIsBot(t);
+        bucket.total++;
+        if (isBot) {
+          bucket.bot++;
+        } else {
+          bucket.humano++;
+        }
+      }
+    });
+
+    return monthCounts.map(({ name, bot, humano, total }) => ({
+      name,
+      bot,
+      humano,
+      total
+    }));
   }, [tickets]);
 
   return (
@@ -339,13 +362,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tickets, attendants, depar
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-bold text-white flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-sky-500" />
-            Atendimentos (Últimos 6 Meses)
+            Atendimentos (Últimos 3 Meses Fechados)
           </h3>
         </div>
         
         <div className="h-[300px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={last6MonthsData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+            <BarChart data={last3MonthsData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
               <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
